@@ -1,0 +1,28 @@
+[project]
+name = "sparse-wsi-vit"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "p-adema", email = "peter.adema@student.uva.nl" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "h5py>=3.16.0",
+    "matplotlib>=3.10.8",
+    "numpy>=2.4.4",
+    "omegaconf>=2.3.0",
+    "pandas>=3.0.2",
+    "pillow>=12.2.0",
+    "pytest>=9.0.3",
+    "pytorch-lightning>=2.6.1",
+    "rich>=14.3.3",
+    "torch>=2.11.0",
+    "torchmetrics>=1.9.0",
+    "torchvision>=0.26.0",
+    "wandb>=0.25.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.21,<0.10.0"]
+build-backend = "uv_build"
