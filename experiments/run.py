@@ -104,7 +104,11 @@ def main() -> None:
     datamodule.setup()
 
     # Construct model
-    network = instantiate(config.net, in_features=datamodule.input_channels, out_features=datamodule.output_channels)
+    network = instantiate(
+        config.net,
+        in_features=datamodule.input_channels,
+        out_features=datamodule.output_channels,
+    )
 
     # Compile the model if specified
     if config.compile:
@@ -132,9 +136,13 @@ def main() -> None:
         )
     else:
         # Use the deterministic run name with timestamp
-        run_name = get_deterministic_run_name(args.config, args.overrides, use_timestamp=True)
+        run_name = get_deterministic_run_name(
+            args.config, args.overrides, use_timestamp=True
+        )
 
-    experiment_dir = Path(experiment_dir) if experiment_dir is not None else Path("runs") / run_name
+    experiment_dir = (
+        Path(experiment_dir) if experiment_dir is not None else Path("runs") / run_name
+    )
     experiment_dir.mkdir(parents=True, exist_ok=True)
 
     autoresume_ckpt_path = None
@@ -143,7 +151,9 @@ def main() -> None:
         if run_id_file.exists():
             attach_run_id = run_id_file.read_text().strip()
         else:
-            raise RuntimeError(f"[autoresume] No run ID file found in experiment directory '{experiment_dir}'.")
+            raise RuntimeError(
+                f"[autoresume] No run ID file found in experiment directory '{experiment_dir}'."
+            )
     else:
         attach_run_id = wandb.util.generate_id()
         run_id_file.write_text(attach_run_id)
@@ -192,7 +202,9 @@ def main() -> None:
         if args.overrides:
             command += " " + " ".join(args.overrides)
         # Log the command.
-        wandb_logger.experiment.config.update({"command": command}, allow_val_change=True)
+        wandb_logger.experiment.config.update(
+            {"command": command}, allow_val_change=True
+        )
 
     # Print the config files prior to training
     config_dict = config_to_dict_for_rich(config)
@@ -201,7 +213,9 @@ def main() -> None:
     rprint(tree)
 
     # Create trainer
-    trainer, checkpoint_callback = construct_trainer(config, wandb_logger, run_name, experiment_dir, num_nodes)
+    trainer, checkpoint_callback = construct_trainer(
+        config, wandb_logger, run_name, experiment_dir, num_nodes
+    )
 
     # Validate that the checkpoint has been correctly loaded before training (for no autoresume)
     if autoresume_ckpt_path is None and config.resume_from_checkpoint.load:
@@ -220,7 +234,9 @@ def main() -> None:
         if best_ckpt_path and os.path.isfile(best_ckpt_path):
             model.load_state_dict(torch.load(best_ckpt_path)["state_dict"])
         else:
-            print(f"[checkpoint] Skipping weight reload; best checkpoint not found (path={best_ckpt_path!r}).")
+            print(
+                f"[checkpoint] Skipping weight reload; best checkpoint not found (path={best_ckpt_path!r})."
+            )
 
     # Validate and test before finishing
     trainer.validate(

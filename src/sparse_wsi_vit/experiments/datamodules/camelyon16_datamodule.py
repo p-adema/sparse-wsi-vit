@@ -15,7 +15,7 @@ from sparse_wsi_vit.datasets.camelyon16_dataset import Camelyon16PatchDataset
 class Camelyon16DataModule(pl.LightningDataModule):
     """
     LightningDataModule for CAMELYON16 WSI patches.
-    
+
     Expects pre-computed JSON indices mapping out valid tissue patches.
     """
 
@@ -38,7 +38,7 @@ class Camelyon16DataModule(pl.LightningDataModule):
         self.train_index_file = train_index_file
         self.val_index_file = val_index_file
         self.test_index_file = test_index_file
-        
+
         self.patch_size = patch_size
         self.level = level
         self.batch_size = batch_size
@@ -55,34 +55,34 @@ class Camelyon16DataModule(pl.LightningDataModule):
         path = Path(index_path)
         if not path.is_absolute():
             path = self.data_dir / path
-            
+
         if not path.exists():
             raise FileNotFoundError(f"Index file not found: {path}")
-            
+
         with open(path, "r") as f:
             return json.load(f)
 
     def setup(self, stage: Optional[str] = None):
         """Load JSON indices and instantiate the MONAI-backed datasets."""
-        
+
         if stage in ("fit", None):
             train_info = self._load_index(self.train_index_file)
             val_info = self._load_index(self.val_index_file)
-            
+
             self.train_dataset = Camelyon16PatchDataset(
                 patch_info=train_info,
                 patch_size=self.patch_size,
                 level=self.level,
                 transform=self.train_transforms,
-                backend=self.backend
+                backend=self.backend,
             )
-            
+
             self.val_dataset = Camelyon16PatchDataset(
                 patch_info=val_info,
                 patch_size=self.patch_size,
                 level=self.level,
                 transform=self.val_transforms,
-                backend=self.backend
+                backend=self.backend,
             )
 
         if stage in ("test", None) and self.test_index_file:
@@ -92,7 +92,7 @@ class Camelyon16DataModule(pl.LightningDataModule):
                 patch_size=self.patch_size,
                 level=self.level,
                 transform=self.val_transforms,
-                backend=self.backend
+                backend=self.backend,
             )
 
     def train_dataloader(self):

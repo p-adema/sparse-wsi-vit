@@ -1,48 +1,51 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import timm
+import vit_5
+
+vit_5.register()
 
 
-class ABMIL(nn.Module):
-    """Attention-Based Multiple Instance Learning (Ilse et al., 2018).
+class VitDensePreEmbedded(nn.Module):
+    """ViT-5: Vision Transformers for the Mid-2020s
 
-    Takes a bag of instance features of shape (B, N, D) and predicts a bag-level label.
-    Uses gated attention: a(x) = softmax(W * (tanh(V*x) ⊙ sigmoid(U*x))).
+    Runs a ViT-5 model on the pre-embedded patch embeddings from Virchow2.
+    This is a terrible, terrible idea, because the tokens aren't arranged in a square
+    and this isn't what ViT-5 was designed to do. But I'll fix that later.
 
     Args:
         in_features: Dimension D of each instance feature vector.
         hidden_dim: Dimension of the attention hidden layer.
         out_features: Number of output classes.
-        num_branches: Number of parallel attention branches (multi-head).
-        attention_dropout: Dropout probability in the classifier head.
     """
 
     def __init__(
-        self,
-        in_features: int = 1280,
-        hidden_dim: int = 256,
-        out_features: int = 1,
-        num_branches: int = 1,
-        attention_dropout: float = 0.25,
+            self,
+            in_features: int = 1280,
+            hidden_dim: int = 256,
+            out_features: int = 1,
     ):
         super().__init__()
         self.out_features = out_features
         self.in_features = in_features
-
-        self.attention_v = nn.Sequential(nn.Linear(in_features, hidden_dim), nn.Tanh())
-        self.attention_u = nn.Sequential(
-            nn.Linear(in_features, hidden_dim), nn.Sigmoid()
+        self.downproj = nn.Linear(in_features, hidden_dim)
+        self.vit5 = timm.create_model(
+            "vit5_small",
+            num_classes=out_features,
+            drop_rate=0.0,
+            drop_path_rate=0.1,
+            img_size=320,  # 320 * 320 = 102 400
+            pre_embedded_input=True,
+            ape=False,  # it's learnable, which breaks with variable size inputs.
+            patch_size=1,  # each token is a patch, effectively
+            rope=False,  # this assumes a fixed rectangular layout, which we don't have!
+            embed_dim=hidden_dim,
+            num_heads=8,
+            depth=6,
         )
-        self.attention_weights = nn.Linear(hidden_dim, num_branches)
 
-        self.classifier = nn.Sequential(
-            nn.Linear(in_features * num_branches, in_features // 2),
-            nn.ReLU(),
-            nn.Dropout(attention_dropout),
-            nn.Linear(in_features // 2, out_features),
-        )
-
-    def forward(self, x: torch.Tensor, return_attention: bool = False) -> dict:
+    def forward(self, x: torch.Tensor) -> dict:
         """Run a forward pass over a feature bag.
 
         Args:
@@ -76,20 +79,8 @@ class ABMIL(nn.Module):
                 f"Feature dimension mismatch: expected {self.in_features}, got {D}."
             )
 
-        # Gated attention
-        a_v = self.attention_v(x)  # (B, N, hidden_dim)
-        a_u = self.attention_u(x)  # (B, N, hidden_dim)
-        a = self.attention_weights(a_v * a_u)  # (B, N, num_branches)
-        a = torch.transpose(a, 1, 2)  # (B, num_branches, N)
-        a = F.softmax(a, dim=2)  # (B, num_branches, N)
-
-        # Aggregate
-        M = torch.bmm(a, x)  # (B, num_branches, D)
-        M = M.view(B, -1)  # (B, num_branches * D)
-
-        logits = self.classifier(M)  # (B, out_features)
+        down = self.downproj(x)  # (B, L, hidden_dim)
+        logits = self.vit5(down)  # (B, out_features)
 
         out = {"logits": logits}
-        if return_attention:
-            out["attention"] = a
         return out

@@ -45,16 +45,18 @@ class Camelyon16PatchDataset(Dataset):
             backend: WSI backend (cucim is highly recommended on Linux/GPU).
         """
         if WSIReader is None:
-            raise ImportError("MONAI is required. Install with `pip install monai cucim`.")
+            raise ImportError(
+                "MONAI is required. Install with `pip install monai cucim`."
+            )
 
         self.patch_info = patch_info
         self.patch_size = patch_size
         self.level = level
         self.transform = transform
-        
+
         # Instantiate reader. Note: cuCIM is exceptionally fast for TIFF loading.
         self.reader = WSIReader(backend=backend)
-        
+
         # Cache of read WSI objects to prevent reopening the same file continuously
         # if __getitem__ asks for patches from the same slide sequentially.
         self._current_slide_path = None
@@ -82,13 +84,13 @@ class Camelyon16PatchDataset(Dataset):
             self._current_wsi_obj,
             location=(x, y),
             size=self.patch_size,
-            level=self.level
+            level=self.level,
         )
-        
+
         # img_data is usually shaped (C, H, W). Convert to standard Tensor.
         if not isinstance(img_data, torch.Tensor):
             img_data = torch.from_numpy(img_data)
-        
+
         if self.transform:
             img_data = self.transform(img_data)
 
@@ -97,5 +99,5 @@ class Camelyon16PatchDataset(Dataset):
             "label": torch.tensor(label, dtype=torch.long),
             "image_path": image_path,
             "x": x,
-            "y": y
+            "y": y,
         }

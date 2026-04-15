@@ -2,7 +2,9 @@ import torch
 import torchmetrics
 
 from sparse_wsi_vit.experiments.default_cfg import ExperimentConfig
-from sparse_wsi_vit.experiments.lightning_wrappers.base_lightning_wrapper import LightningWrapperBase
+from sparse_wsi_vit.experiments.lightning_wrappers.base_lightning_wrapper import (
+    LightningWrapperBase,
+)
 
 
 class MILWrapper(LightningWrapperBase):
@@ -70,7 +72,9 @@ class MILWrapper(LightningWrapperBase):
         accuracy_calculator.update(preds, labels)
         return loss, preds, {"logits": logits}
 
-    def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+    def training_step(
+        self, batch: dict[str, torch.Tensor], batch_idx: int
+    ) -> torch.Tensor:
         """Perform one training step and log loss.
 
         Args:
@@ -82,8 +86,11 @@ class MILWrapper(LightningWrapperBase):
         """
         loss, _, _ = self._step(batch, self.train_acc)
         self.log(
-            "train/loss", loss,
-            on_step=True, on_epoch=True, sync_dist=True,
+            "train/loss",
+            loss,
+            on_step=True,
+            on_epoch=True,
+            sync_dist=True,
             batch_size=batch["input"].size(0),
         )
         return loss
@@ -94,7 +101,9 @@ class MILWrapper(LightningWrapperBase):
         self.log("train/acc", acc, sync_dist=True)
         self.train_acc.reset()
 
-    def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+    def validation_step(
+        self, batch: dict[str, torch.Tensor], batch_idx: int
+    ) -> torch.Tensor:
         """Perform one validation step and log loss.
 
         Args:
@@ -106,8 +115,11 @@ class MILWrapper(LightningWrapperBase):
         """
         loss, _, _ = self._step(batch, self.val_acc)
         self.log(
-            "val/loss", loss,
-            on_step=False, on_epoch=True, sync_dist=True,
+            "val/loss",
+            loss,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
             batch_size=batch["input"].size(0),
         )
         return loss

@@ -67,7 +67,13 @@ class WandbCacheCleanupCallback(pl.callbacks.Callback):
         if not self.background:
             try:
                 subprocess.run(
-                    [self.executable, "artifact", "cache", "cleanup", self.max_cache_size],
+                    [
+                        self.executable,
+                        "artifact",
+                        "cache",
+                        "cleanup",
+                        self.max_cache_size,
+                    ],
                     check=False,
                     env=self.extra_env,
                     timeout=self.timeout,
@@ -77,7 +83,9 @@ class WandbCacheCleanupCallback(pl.callbacks.Callback):
             return
 
         if self._background_thread is None or not self._background_thread.is_alive():
-            self._background_thread = threading.Thread(target=self._cleanup_task, daemon=True)
+            self._background_thread = threading.Thread(
+                target=self._cleanup_task, daemon=True
+            )
             self._background_thread.start()
 
     def on_fit_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
@@ -85,7 +93,9 @@ class WandbCacheCleanupCallback(pl.callbacks.Callback):
         if self.run_on_fit_start and self._should_run(trainer):
             self._run_cleanup()
 
-    def on_train_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+    def on_train_epoch_end(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule
+    ) -> None:
         """Runs cleanup at the end of each training epoch."""
         if not self._should_run(trainer):
             return
