@@ -1,3 +1,5 @@
+import warnings
+
 import torch
 import torch.nn as nn
 from functools import partial
@@ -18,24 +20,26 @@ from .rope import VisionRotaryEmbedding
 class Attention(nn.Module):
     # taken from https://github.com/rwightman/pytorch-image-models/blob/master/timm/models/vision_transformer.py
     def __init__(
-        self,
-        dim,
-        num_heads=8,
-        qkv_bias=False,
-        qk_scale=None,
-        attn_drop=0.0,
-        proj_drop=0.0,
-        flash=True,
-        rope_size=0,
-        rope_reg_size=0,
-        num_registers=0,
-        reg_theta=10000,
-        qk_norm=False,
+            self,
+            dim,
+            num_heads=8,
+            qkv_bias=False,
+            qk_scale=None,
+            attn_drop=0.0,
+            proj_drop=0.0,
+            flash=True,
+            rope_size=0,
+            rope_reg_size=0,
+            rope_dynamic=False,
+            rope_dynamic_high=100_000,
+            num_registers=0,
+            reg_theta=10000,
+            qk_norm=False,
     ):
         super().__init__()
         self.num_heads = num_heads
         head_dim = dim // num_heads
-        self.scale = qk_scale or head_dim**-0.5
+        self.scale = qk_scale or head_dim ** -0.5
 
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.attn_drop = nn.Dropout(attn_drop)
@@ -45,7 +49,14 @@ class Attention(nn.Module):
         self.flash = flash
         self.num_registers = num_registers
         self.rope = (
-            VisionRotaryEmbedding(head_dim // 2, rope_size) if rope_size > 0 else None
+            VisionRotaryEmbedding(
+                head_dim // 2,
+                rope_size,
+                dynamic=rope_dynamic,
+                coord_high=rope_dynamic_high,
+            )
+            if rope_size > 0
+            else None
         )
         self.rope_reg = (
             VisionRotaryEmbedding(head_dim // 2, rope_reg_size, theta=reg_theta)
@@ -58,7 +69,7 @@ class Attention(nn.Module):
             self.q_norm = RMSNorm(head_dim, eps=1e-6)
             self.k_norm = RMSNorm(head_dim, eps=1e-6)
 
-    def forward(self, x):
+    def forward(self, x, coords=None):
         B, N, C = x.shape
         reg_idx = N - self.num_registers
 
@@ -71,8 +82,12 @@ class Attention(nn.Module):
             k = self.k_norm(k).to(qk_dtype)
 
         if self.rope is not None:
-            q = torch.cat((q[:, :1], self.rope(q[:, 1:reg_idx]), q[:, reg_idx:]), dim=1)
-            k = torch.cat((k[:, :1], self.rope(k[:, 1:reg_idx]), k[:, reg_idx:]), dim=1)
+            q = torch.cat(
+                (q[:, :1], self.rope(q[:, 1:reg_idx], coords), q[:, reg_idx:]), dim=1
+            )
+            k = torch.cat(
+                (k[:, :1], self.rope(k[:, 1:reg_idx], coords), k[:, reg_idx:]), dim=1
+            )
         if self.rope_reg is not None:
             q = torch.cat(
                 (q[:, :1], q[:, 1:reg_idx], self.rope_reg(q[:, reg_idx:])), dim=1
@@ -116,14 +131,14 @@ class RMSNorm(nn.Module):
 
 class SwiGLU(nn.Module):
     def __init__(
-        self,
-        in_features,
-        hidden_features=None,
-        out_features=None,
-        act_layer=nn.SiLU,
-        drop=0.0,
-        norm_layer=nn.LayerNorm,
-        subln=False,
+            self,
+            in_features,
+            hidden_features=None,
+            out_features=None,
+            act_layer=nn.SiLU,
+            drop=0.0,
+            norm_layer=nn.LayerNorm,
+            subln=False,
     ):
         super().__init__()
         out_features = out_features or in_features
@@ -150,27 +165,29 @@ class SwiGLU(nn.Module):
 
 class Block(nn.Module):
     def __init__(
-        self,
-        dim,
-        num_heads,
-        mlp_ratio=4.0,
-        qkv_bias=False,
-        qk_scale=None,
-        drop=0.0,
-        attn_drop=0.0,
-        drop_path=0.0,
-        act_layer=nn.GELU,
-        norm_layer=nn.LayerNorm,
-        Attention_block=Attention,
-        Mlp_block=Mlp,
-        init_values=1e-4,
-        flash=True,
-        rope_size=0,
-        rope_reg_size=0,
-        reg_theta=10000,
-        num_registers=0,
-        qk_norm=False,
-        layer_scale=True,
+            self,
+            dim,
+            num_heads,
+            mlp_ratio=4.0,
+            qkv_bias=False,
+            qk_scale=None,
+            drop=0.0,
+            attn_drop=0.0,
+            drop_path=0.0,
+            act_layer=nn.GELU,
+            norm_layer=nn.LayerNorm,
+            Attention_block=Attention,
+            Mlp_block=Mlp,
+            init_values=1e-4,
+            flash=True,
+            rope_size=0,
+            rope_reg_size=0,
+            rope_dynamic=False,
+            rope_dynamic_high=100_000,
+            reg_theta=10000,
+            num_registers=0,
+            qk_norm=False,
+            layer_scale=True,
     ):
         super().__init__()
         self.norm1 = norm_layer(dim)
@@ -184,6 +201,8 @@ class Block(nn.Module):
             flash=flash,
             rope_size=rope_size,
             rope_reg_size=rope_reg_size,
+            rope_dynamic=rope_dynamic,
+            rope_dynamic_high=rope_dynamic_high,
             num_registers=num_registers,
             qk_norm=qk_norm,
             reg_theta=reg_theta,
@@ -207,12 +226,12 @@ class Block(nn.Module):
                 init_values * torch.ones((dim)), requires_grad=True
             )
 
-    def forward(self, x):
+    def forward(self, x, coords=None):
         if self.layer_scale:
-            x = x + self.drop_path(self.gamma_1 * self.attn(self.norm1(x)))
+            x = x + self.drop_path(self.gamma_1 * self.attn(self.norm1(x), coords))
             x = x + self.drop_path(self.gamma_2 * self.mlp(self.norm2(x)))
         else:
-            x = x + self.drop_path(self.attn(self.norm1(x)))
+            x = x + self.drop_path(self.attn(self.norm1(x), coords))
             x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
 
@@ -224,44 +243,54 @@ class vit_models(nn.Module):
     """
 
     def __init__(
-        self,
-        img_size=224,
-        patch_size=16,
-        in_chans=3,
-        num_classes=1000,
-        embed_dim=768,
-        depth=12,
-        num_heads=12,
-        mlp_ratio=4.0,
-        qkv_bias=False,
-        qk_scale=None,
-        drop_rate=0.0,
-        attn_drop_rate=0.0,
-        drop_path_rate=0.0,
-        norm_layer=nn.LayerNorm,
-        ape=True,
-        block_layers=Block,
-        Patch_layer=PatchEmbed,
-        act_layer=nn.GELU,
-        Attention_block=Attention,
-        Mlp_block=Mlp,
-        init_scale=1e-4,
-        flash=True,
-        rope=False,
-        num_registers=0,
-        qk_norm=False,
-        reg_theta=10000,
-        layer_scale=True,
-        pre_embedded_input=False,
-        checkpoint_activations=False,
-        **kwargs,
+            self,
+            img_size=224,
+            patch_size=16,
+            in_chans=3,
+            num_classes=1000,
+            embed_dim=768,
+            depth=12,
+            num_heads=12,
+            mlp_ratio=4.0,
+            qkv_bias=False,
+            qk_scale=None,
+            drop_rate=0.0,
+            attn_drop_rate=0.0,
+            drop_path_rate=0.0,
+            norm_layer=nn.LayerNorm,
+            ape=True,
+            block_layers=Block,
+            Patch_layer=PatchEmbed,
+            act_layer=nn.GELU,
+            Attention_block=Attention,
+            Mlp_block=Mlp,
+            init_scale=1e-4,
+            flash=True,
+            rope=False,
+            rope_reg=False,
+            rope_dynamic=False,
+            rope_dynamic_high=100_000,
+            num_registers=0,
+            qk_norm=False,
+            reg_theta=10000,
+            layer_scale=True,
+            pre_embedded_input=False,
+            checkpoint_activations=False,
+            pretrained=False,
+            pretrained_cfg=None,
+            pretrained_cfg_overlay=None,
+            cache_dir=None,
     ):
+        assert not pretrained, "No support yet for pretrained models!"
         super().__init__()
         self.dropout_rate = drop_rate
         self.num_classes = num_classes
         self.num_features = self.embed_dim = embed_dim
         self.num_registers = num_registers
         self.checkpoint_activations = checkpoint_activations
+
+        if rope_dynamic and not rope:
+            warnings.warn(f"{rope_dynamic=} has no effect with {rope=}", stacklevel=3)
 
         if not pre_embedded_input:
             self.patch_embed = Patch_layer(
@@ -274,7 +303,8 @@ class vit_models(nn.Module):
         else:
             self.patch_embed = nn.Sequential()
             num_patches = -1
-            assert not ape, "Can't use positional embedding with variable patch size"
+            if ape or (rope and not rope_dynamic):
+                warnings.warn(f"APE/non-dynamic RoPe might break", stacklevel=3)
 
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.reg_token = (
@@ -283,8 +313,8 @@ class vit_models(nn.Module):
             else None
         )
 
-        rope_reg_size = int(num_registers**0.5)
-        assert rope_reg_size**2 == num_registers, (
+        rope_reg_size = int(num_registers ** 0.5)
+        assert rope_reg_size ** 2 == num_registers, (
             "num_registers must be a square number"
         )
 
@@ -311,7 +341,9 @@ class vit_models(nn.Module):
                     init_values=init_scale,
                     flash=flash,
                     rope_size=img_size // patch_size if rope else 0,
-                    rope_reg_size=rope_reg_size,
+                    rope_reg_size=rope_reg_size if rope_reg else 0,
+                    rope_dynamic=rope_dynamic,
+                    rope_dynamic_high=rope_dynamic_high,
                     num_registers=num_registers,
                     qk_norm=qk_norm,
                     reg_theta=reg_theta,
@@ -360,7 +392,7 @@ class vit_models(nn.Module):
             nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
         )
 
-    def forward_features(self, x):
+    def forward_features(self, x, coords=None):
         B = x.shape[0]
         x = self.patch_embed(x)
 
@@ -379,16 +411,18 @@ class vit_models(nn.Module):
         for i, blk in enumerate(self.blocks):
             # print(f"block {i}! {torch.cuda.memory_allocated()/1e9}GB alloc")
             if self.checkpoint_activations:
-                x = torch.utils.checkpoint.checkpoint(blk, x, use_reentrant=False)
+                x = torch.utils.checkpoint.checkpoint(
+                    blk, x, coords, use_reentrant=False
+                )
             else:
-                x = blk(x)
+                x = blk(x, coords)
 
         x = self.norm(x)
         return x[:, 0]
 
-    def forward(self, x):
+    def forward(self, x, coords=None):
 
-        x = self.forward_features(x)
+        x = self.forward_features(x, coords)
 
         if self.dropout_rate:
             x = F.dropout(x, p=float(self.dropout_rate), training=self.training)
@@ -399,15 +433,15 @@ class vit_models(nn.Module):
 
 @register_model
 def deit_small_patch16_LS(
-    img_size=224,
-    flash=True,
-    embed_dim=384,
-    patch_size=16,
-    depth=12,
-    num_heads=6,
-    mlp_ratio=4,
-    qkv_bias=True,
-    **kwargs,
+        img_size=224,
+        flash=True,
+        embed_dim=384,
+        patch_size=16,
+        depth=12,
+        num_heads=6,
+        mlp_ratio=4,
+        qkv_bias=True,
+        **kwargs,
 ):
     model = vit_models(
         img_size=img_size,
@@ -427,15 +461,15 @@ def deit_small_patch16_LS(
 
 @register_model
 def deit_base_patch16_LS(
-    img_size=224,
-    flash=True,
-    embed_dim=768,
-    patch_size=16,
-    depth=12,
-    num_heads=12,
-    mlp_ratio=4,
-    qkv_bias=True,
-    **kwargs,
+        img_size=224,
+        flash=True,
+        embed_dim=768,
+        patch_size=16,
+        depth=12,
+        num_heads=12,
+        mlp_ratio=4,
+        qkv_bias=True,
+        **kwargs,
 ):
     model = vit_models(
         img_size=img_size,
@@ -455,15 +489,15 @@ def deit_base_patch16_LS(
 
 @register_model
 def deit_large_patch16_LS(
-    img_size=224,
-    flash=True,
-    embed_dim=1024,
-    patch_size=16,
-    depth=24,
-    num_heads=16,
-    mlp_ratio=4,
-    qkv_bias=True,
-    **kwargs,
+        img_size=224,
+        flash=True,
+        embed_dim=1024,
+        patch_size=16,
+        depth=24,
+        num_heads=16,
+        mlp_ratio=4,
+        qkv_bias=True,
+        **kwargs,
 ):
     model = vit_models(
         img_size=img_size,
@@ -483,20 +517,20 @@ def deit_large_patch16_LS(
 
 @register_model
 def vit5_small(
-    img_size=224,
-    flash=True,
-    embed_dim=384,
-    patch_size=16,
-    depth=12,
-    num_heads=6,
-    mlp_ratio=4,
-    qkv_bias=False,
-    num_registers=4,
-    rope=True,
-    rope_reg=True,
-    reg_theta=100,
-    qk_norm=True,
-    **kwargs,
+        img_size=224,
+        flash=True,
+        embed_dim=384,
+        patch_size=16,
+        depth=12,
+        num_heads=6,
+        mlp_ratio=4,
+        qkv_bias=False,
+        num_registers=4,
+        rope=True,
+        rope_reg=True,
+        reg_theta=100,
+        qk_norm=True,
+        **kwargs,
 ):
     model = vit_models(
         img_size=img_size,
@@ -521,20 +555,20 @@ def vit5_small(
 
 @register_model
 def vit5_base(
-    img_size=224,
-    flash=True,
-    embed_dim=768,
-    patch_size=16,
-    depth=12,
-    num_heads=12,
-    mlp_ratio=4,
-    qkv_bias=False,
-    num_registers=4,
-    rope=True,
-    rope_reg=True,
-    reg_theta=100,
-    qk_norm=True,
-    **kwargs,
+        img_size=224,
+        flash=True,
+        embed_dim=768,
+        patch_size=16,
+        depth=12,
+        num_heads=12,
+        mlp_ratio=4,
+        qkv_bias=False,
+        num_registers=4,
+        rope=True,
+        rope_reg=True,
+        reg_theta=100,
+        qk_norm=True,
+        **kwargs,
 ):
     model = vit_models(
         img_size=img_size,
@@ -559,20 +593,20 @@ def vit5_base(
 
 @register_model
 def vit5_large(
-    img_size=224,
-    flash=True,
-    embed_dim=1024,
-    patch_size=16,
-    depth=24,
-    num_heads=16,
-    mlp_ratio=4,
-    qkv_bias=False,
-    num_registers=4,
-    rope=True,
-    rope_reg=True,
-    reg_theta=100,
-    qk_norm=True,
-    **kwargs,
+        img_size=224,
+        flash=True,
+        embed_dim=1024,
+        patch_size=16,
+        depth=24,
+        num_heads=16,
+        mlp_ratio=4,
+        qkv_bias=False,
+        num_registers=4,
+        rope=True,
+        rope_reg=True,
+        reg_theta=100,
+        qk_norm=True,
+        **kwargs,
 ):
     model = vit_models(
         img_size=img_size,
@@ -597,20 +631,20 @@ def vit5_large(
 
 @register_model
 def vit5_xlarge(
-    img_size=224,
-    flash=True,
-    embed_dim=1152,
-    patch_size=16,
-    depth=28,
-    num_heads=16,
-    mlp_ratio=4,
-    qkv_bias=False,
-    num_registers=4,
-    rope=True,
-    rope_reg=True,
-    reg_theta=100,
-    qk_norm=True,
-    **kwargs,
+        img_size=224,
+        flash=True,
+        embed_dim=1152,
+        patch_size=16,
+        depth=28,
+        num_heads=16,
+        mlp_ratio=4,
+        qkv_bias=False,
+        num_registers=4,
+        rope=True,
+        rope_reg=True,
+        reg_theta=100,
+        qk_norm=True,
+        **kwargs,
 ):
     model = vit_models(
         img_size=img_size,

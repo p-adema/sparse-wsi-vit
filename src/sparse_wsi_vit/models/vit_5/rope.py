@@ -45,6 +45,8 @@ class VisionRotaryEmbedding(nn.Module):
         theta=10000,
         max_freq=10,
         num_freqs=1,
+        coord_high=None,
+        dynamic=False,
     ):
         super().__init__()
         if custom_freqs:
@@ -61,15 +63,32 @@ class VisionRotaryEmbedding(nn.Module):
             raise ValueError(f"unknown modality {freqs_for}")
 
         self.pt_seq_len = pt_seq_len
+        self.coord_high = coord_high
+        self.dynamic = dynamic
         self.register_buffer("freqs", freqs)
 
-    def forward(self, x):
-        ft_seq_len = int(np.sqrt(x.shape[1]))
-        t = torch.arange(ft_seq_len).cuda() / ft_seq_len * self.pt_seq_len
+    def forward(self, x, coords: torch.Tensor | None = None):
+        if not self.dynamic:
+            # Fixed, dense image
+            ft_seq_len = int(np.sqrt(x.shape[1]))
+            t = torch.arange(ft_seq_len).cuda() / ft_seq_len * self.pt_seq_len
 
-        freqs = torch.einsum("..., f -> ... f", t, self.freqs)
-        freqs = repeat(freqs, "... n -> ... (n r)", r=2)  # 14*32
-        freqs = broadcat((freqs[:, None, :], freqs[None, :, :]), dim=-1)  # 14*14*64
+            freqs = torch.einsum("..., f -> ... f", t, self.freqs)
+            freqs = repeat(freqs, "... n -> ... (n r)", r=2)  # 14*32
+            freqs = broadcat((freqs[:, None, :], freqs[None, :, :]), dim=-1)  # 14*14*64
+        else:
+            # Dynamic image with coordinates for all tokens
+            if coords.ndim != 3:
+                raise ValueError(f"Expected {coords.shape=} to be (B, L, 2)")
+
+            t_x = coords[..., 0] / self.coord_high
+            t_y = coords[..., 1] / self.coord_high
+
+            freqs_x = torch.einsum("..., f -> ... f", t_x, self.freqs)
+            freqs_x = repeat(freqs_x, "... n -> ... (n r)", r=2)
+            freqs_y = torch.einsum("..., f -> ... f", t_y, self.freqs)
+            freqs_y = repeat(freqs_y, "... n -> ... (n r)", r=2)
+            freqs = broadcat((freqs_x[:, None, :], freqs_y[None, :, :]), dim=-1)
 
         freqs_cos = freqs.cos().view(-1, 1, freqs.shape[-1])
         freqs_sin = freqs.sin().view(-1, 1, freqs.shape[-1])

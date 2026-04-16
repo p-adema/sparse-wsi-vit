@@ -22,10 +22,10 @@ class VitDensePreEmbedded(nn.Module):
     """
 
     def __init__(
-            self,
-            in_features: int = 1280,
-            hidden_dim: int = 256,
-            out_features: int = 1,
+        self,
+        in_features: int = 1280,
+        hidden_dim: int = 256,
+        out_features: int = 1,
     ):
         super().__init__()
         self.out_features = out_features
