@@ -11,7 +11,6 @@ from typing import Any, Callable, Dict, Type, Union
 import torch
 from omegaconf import DictConfig, OmegaConf
 
-
 PLACEHOLDER = None
 
 
