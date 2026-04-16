@@ -2,9 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import timm
-import vit_5
 
-vit_5.register()
+from sparse_wsi_vit.models.vit_5 import register as register_vit_5
+
+register_vit_5()
 
 
 class VitDensePreEmbedded(nn.Module):

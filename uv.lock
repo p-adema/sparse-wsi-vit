@@ -7,12 +7,6 @@ resolution-markers = [
     "sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 
-[manifest]
-members = [
-    "sparse-wsi-vit",
-    "vit-5",
-]
-
 [[package]]
 name = "aiohappyeyeballs"
 version = "2.6.1"
@@ -2105,6 +2099,7 @@ name = "sparse-wsi-vit"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "einops" },
     { name = "h5py" },
     { name = "jupyter" },
     { name = "matplotlib" },
@@ -2118,16 +2113,17 @@ dependencies = [
     { name = "pytorch-lightning" },
     { name = "rich" },
     { name = "ruff" },
+    { name = "timm" },
     { name = "torch" },
     { name = "torchmetrics" },
     { name = "torchvision" },
     { name = "ty" },
-    { name = "vit-5" },
     { name = "wandb" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "einops", specifier = ">=0.8.2" },
     { name = "h5py", specifier = ">=3.16.0" },
     { name = "jupyter", specifier = ">=1.1.1" },
     { name = "matplotlib", specifier = ">=3.10.8" },
@@ -2141,11 +2137,11 @@ requires-dist = [
     { name = "pytorch-lightning", specifier = ">=2.6.1" },
     { name = "rich", specifier = ">=14.3.3" },
     { name = "ruff", specifier = ">=0.15.10" },
+    { name = "timm", specifier = ">=1.0.26" },
     { name = "torch", specifier = ">=2.11.0" },
     { name = "torchmetrics", specifier = ">=1.9.0" },
     { name = "torchvision", specifier = ">=0.26.0" },
     { name = "ty", specifier = ">=0.0.30" },
-    { name = "vit-5", editable = "src/ViT-5" },
     { name = "wandb", specifier = ">=0.25.1" },
 ]
 
@@ -2407,29 +2403,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/c7/24/5f1b3bdffd70275f6661c76461e25f024d5a38a46f04aaca912426a2b1d3/urllib3-2.6.3.tar.gz", hash = "sha256:1b62b6884944a57dbe321509ab94fd4d3b307075e0c2eae991ac71ee15ad38ed", size = 435556, upload-time = "2026-01-07T16:24:43.925Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/39/08/aaaad47bc4e9dc8c725e68f9d04865dbcb2052843ff09c97b08904852d84/urllib3-2.6.3-py3-none-any.whl", hash = "sha256:bf272323e553dfb2e87d9bfd225ca7b0f467b919d7bbd355436d3fd37cb0acd4", size = 131584, upload-time = "2026-01-07T16:24:42.685Z" },
-]
-
-[[package]]
-name = "vit-5"
-version = "0.1.0"
-source = { editable = "src/ViT-5" }
-dependencies = [
-    { name = "einops" },
-    { name = "numpy" },
-    { name = "timm" },
-    { name = "torch" },
-    { name = "torchvision" },
-    { name = "wandb" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "einops", specifier = ">=0.8.2" },
-    { name = "numpy", specifier = ">=2.4.4" },
-    { name = "timm", specifier = ">=1.0.26" },
-    { name = "torch", specifier = ">=2.11.0" },
-    { name = "torchvision", specifier = ">=0.26.0" },
-    { name = "wandb", specifier = ">=0.26.0" },
 ]
 
 [[package]]
