@@ -37,23 +37,23 @@ def rotate_half(x):
 
 class VisionRotaryEmbedding(nn.Module):
     def __init__(
-        self,
-        dim,
-        pt_seq_len=14,
-        custom_freqs=None,
-        freqs_for="lang",
-        theta=10000,
-        max_freq=10,
-        num_freqs=1,
-        coord_high=None,
-        dynamic=False,
+            self,
+            dim,
+            pt_seq_len=14,
+            custom_freqs=None,
+            freqs_for="lang",
+            theta=10000,
+            max_freq=10,
+            num_freqs=1,
+            coord_high=None,
+            dynamic=False,
     ):
         super().__init__()
         if custom_freqs:
             freqs = custom_freqs
         elif freqs_for == "lang":
             freqs = 1.0 / (
-                theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim)
+                    theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim)
             )
         elif freqs_for == "pixel":
             freqs = torch.linspace(1.0, max_freq / 2, dim // 2) * pi
@@ -92,7 +92,14 @@ class VisionRotaryEmbedding(nn.Module):
 
         freqs_cos = freqs.cos().view(-1, 1, freqs.shape[-1])
         freqs_sin = freqs.sin().view(-1, 1, freqs.shape[-1])
-        return x * freqs_cos + rotate_half(x) * freqs_sin
+        res = x * freqs_cos + rotate_half(x) * freqs_sin
+
+        # for reference, these are the shapes for 62936 tokens of 8x160=1280 dim:
+        #    x.shape=torch.Size([1, 62936, 8, 160]) coords.shape=torch.Size([1, 62936, 2])
+        #    t_x.shape=torch.Size([1, 62936]) freqs_x.shape=torch.Size([1, 62936, 80])
+        #    freqs.shape=torch.Size([1, 1, 62936, 160]) freqs_cos.shape=torch.Size([62936, 1, 160])
+        #    res.shape=torch.Size([1, 62936, 8, 160])
+        return res
 
 
 def rotate_freqs(freqs, angle_deg):
