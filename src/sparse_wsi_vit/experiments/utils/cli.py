@@ -41,7 +41,9 @@ def get_deterministic_run_name(
         A deterministic run name in the format: {config_name}_{timestamp}_{override_hash}
     """
     # Extract config name without extension and directory path
-    config_name = config_path.replace("configs/", "").replace(".py", "").replace("/", "_")
+    config_name = (
+        config_path.replace("configs/", "").replace(".py", "").replace("/", "_")
+    )
 
     # Get current timestamp in format: YYYY-MM-DD-HH-MM-SS
     if use_timestamp:
@@ -59,10 +61,16 @@ def get_deterministic_run_name(
     # Add override hash if overrides are provided
     if overrides and len(overrides) > 0:
         # Filter out debug-related overrides
-        filtered_overrides = [override for override in overrides if not override.startswith("debug")]
+        filtered_overrides = [
+            override for override in overrides if not override.startswith("debug")
+        ]
 
         # Filter out wandb-related overrides
-        filtered_overrides = [override for override in filtered_overrides if not override.startswith("wandb.")]
+        filtered_overrides = [
+            override
+            for override in filtered_overrides
+            if not override.startswith("wandb.")
+        ]
 
         # If we still have overrides after filtering
         if filtered_overrides:
@@ -89,9 +97,7 @@ def get_deterministic_run_name(
             filtered_overrides.sort()
             # Create a string representation of the overrides
             override_str = "_".join(filtered_overrides).replace("=", "_")
-            run_name = (
-                f"{username.upper()}_{config_name}_{override_str}{timestamp}"
-            )
+            run_name = f"{username.upper()}_{config_name}_{override_str}{timestamp}"
             # Limit total run name length to avoid OSError: File name too long
             max_base_len = 180 if use_timestamp else 200
             if len(run_name) > max_base_len + len(timestamp):
@@ -127,13 +133,17 @@ def load_config_from_file(config_path: str) -> ExperimentConfig:
 
     # Get the get_config function
     if not hasattr(module, "get_config"):
-        raise AttributeError(f"Configuration file {config_path} must have a get_config() function")
+        raise AttributeError(
+            f"Configuration file {config_path} must have a get_config() function"
+        )
 
     # Call the get_config function to get the configuration
     return module.get_config()
 
 
-def apply_config_overrides(config: ExperimentConfig, overrides: list[str]) -> ExperimentConfig:
+def apply_config_overrides(
+    config: ExperimentConfig, overrides: list[str]
+) -> ExperimentConfig:
     """Apply command-line overrides to a configuration.
 
     Args:
@@ -174,7 +184,10 @@ def apply_config_overrides(config: ExperimentConfig, overrides: list[str]) -> Ex
 
         # Dataclass objects that might be nested inside DictConfigs
         if hasattr(obj, "__dataclass_fields__"):
-            return {k: _to_nested_container(getattr(obj, k)) for k in obj.__dataclass_fields__.keys()}
+            return {
+                k: _to_nested_container(getattr(obj, k))
+                for k in obj.__dataclass_fields__.keys()
+            }
 
         # Primitive or other objects (functions, classes) kept as-is
         return obj
@@ -184,7 +197,9 @@ def apply_config_overrides(config: ExperimentConfig, overrides: list[str]) -> Ex
     # Process each override on the nested container
     for override in overrides:
         if "=" not in override:
-            print(f"Warning: Ignoring invalid override '{override}'. Must be in format 'key=value'.")
+            print(
+                f"Warning: Ignoring invalid override '{override}'. Must be in format 'key=value'."
+            )
             continue
 
         key, value = override.split("=", 1)
@@ -235,12 +250,20 @@ def apply_config_overrides(config: ExperimentConfig, overrides: list[str]) -> Ex
         # Prepare kwargs for the dataclass
         kwargs = {}
         # Support both plain dict and OmegaConf DictConfig
-        items_iter = data_dict.items() if not isinstance(data_dict, _DictConfig) else list(data_dict.items())
+        items_iter = (
+            data_dict.items()
+            if not isinstance(data_dict, _DictConfig)
+            else list(data_dict.items())
+        )
         for key, value in items_iter:
             if key in fields:
-                field_type = next(f.type for f in dataclasses.fields(data_class) if f.name == key)
+                field_type = next(
+                    f.type for f in dataclasses.fields(data_class) if f.name == key
+                )
                 # If value is a mapping-like (dict or DictConfig) and field is a dataclass, recursively convert
-                if isinstance(value, (dict, _DictConfig)) and hasattr(field_type, "__dataclass_fields__"):
+                if isinstance(value, (dict, _DictConfig)) and hasattr(
+                    field_type, "__dataclass_fields__"
+                ):
                     kwargs[key] = dict_to_dataclass(value, field_type)
                 else:
                     kwargs[key] = value
@@ -253,7 +276,9 @@ def apply_config_overrides(config: ExperimentConfig, overrides: list[str]) -> Ex
     return new_config
 
 
-def verify_no_interpolator_overwrites(config: ExperimentConfig, overrides: list[str]) -> None:
+def verify_no_interpolator_overwrites(
+    config: ExperimentConfig, overrides: list[str]
+) -> None:
     """Prevent overriding fields that are defined as OmegaConf interpolations (e.g., "${...}").
 
     Args:
@@ -271,7 +296,10 @@ def verify_no_interpolator_overwrites(config: ExperimentConfig, overrides: list[
         from omegaconf import OmegaConf as _OC
 
         if _dc.is_dataclass(obj):
-            return {f.name: _to_nested_container(getattr(obj, f.name)) for f in _dc.fields(obj)}
+            return {
+                f.name: _to_nested_container(getattr(obj, f.name))
+                for f in _dc.fields(obj)
+            }
         if isinstance(obj, _DictConfig):
             plain = _OC.to_container(obj, resolve=False)
             return _to_nested_container(plain)
@@ -281,7 +309,10 @@ def verify_no_interpolator_overwrites(config: ExperimentConfig, overrides: list[
             t = type(obj)
             return t(_to_nested_container(v) for v in obj)
         if hasattr(obj, "__dataclass_fields__"):
-            return {k: _to_nested_container(getattr(obj, k)) for k in obj.__dataclass_fields__.keys()}
+            return {
+                k: _to_nested_container(getattr(obj, k))
+                for k in obj.__dataclass_fields__.keys()
+            }
         return obj
 
     nested = _to_nested_container(config)
@@ -311,7 +342,8 @@ def verify_no_interpolator_overwrites(config: ExperimentConfig, overrides: list[
 
     if violations:
         raise ValueError(
-            "The following overrides target interpolated fields and are not allowed: " + ", ".join(violations)
+            "The following overrides target interpolated fields and are not allowed: "
+            + ", ".join(violations)
         )
 
 

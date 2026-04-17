@@ -20,8 +20,6 @@ from sparse_wsi_vit.experiments.utils.schedulers import ChainedScheduler
 from sparse_wsi_vit.experiments.utils.checkpointing import align_compiled_keys
 
 
-
-
 def _get_layer_index(name: str, num_blocks: int) -> int:
     """Map a parameter name to a layer index for LLRD.
 
@@ -30,7 +28,10 @@ def _get_layer_index(name: str, num_blocks: int) -> int:
       - 1..num_blocks: blocks.0 .. blocks.<num_blocks-1>
       - num_blocks + 1: out_norm, out_proj (classification head)
     """
-    if any(name.startswith(f"network.{prefix}") for prefix in ("patch_embed", "cls_token", "pos_embed", "reg_token")):
+    if any(
+        name.startswith(f"network.{prefix}")
+        for prefix in ("patch_embed", "cls_token", "pos_embed", "reg_token")
+    ):
         return 0
     if "network.blocks." in name:
         block_str = name.split("network.blocks.")[1].split(".")[0]
@@ -68,7 +69,9 @@ def _build_param_groups(
     layers is ``layer_decay ** (N - i)``.
     """
     if layer_decay is not None and num_blocks is None:
-        raise ValueError("num_blocks must be set in the config when layer_decay (LLRD) is enabled.")
+        raise ValueError(
+            "num_blocks must be set in the config when layer_decay (LLRD) is enabled."
+        )
     seen_param_ids: set[int] = set()
     # group key = (wd_value, lr_scale) -> list of params
     groups: dict[tuple[float, float], list[torch.nn.Parameter]] = {}
@@ -126,7 +129,6 @@ def _build_param_groups(
     return parameters
 
 
-
 def construct_optimizer(
     model,
     optimizer_cfg: LazyConfig,
@@ -160,7 +162,9 @@ def construct_optimizer(
             wd_params.append(param)
 
     # Safety: ensure no overlaps and no duplicates
-    assert len(seen_param_ids) == len(set(map(id, wd_params))) + len(set(map(id, no_wd_params))), (
+    assert len(seen_param_ids) == len(set(map(id, wd_params))) + len(
+        set(map(id, no_wd_params))
+    ), (
         "Optimizer param group mismatch: duplicate parameters across groups or some trainable "
         "parameters were not assigned. Every requires_grad=True parameter must appear in exactly one group."
     )
@@ -303,6 +307,11 @@ class LightningWrapperBase(pl.LightningModule):
         self.other_outputs_train = []
         self.other_outputs_validation = []
 
+        self._cuda_start_event = None
+        self._timing_forward_accum = 0.0
+        self._timing_backward_accum = 0.0
+        self._timing_step_count = 0
+
     def forward(self, input_and_condition: dict[str, torch.Tensor]):
         """Forward pass of the network.
 
@@ -343,7 +352,9 @@ class LightningWrapperBase(pl.LightningModule):
         # --- 2. current_model_state key remapping (EMA) -------------------
         current_model_state = checkpoint.get("current_model_state")
         if current_model_state is not None:
-            checkpoint["current_model_state"] = align_compiled_keys(current_model_state, model_keys)
+            checkpoint["current_model_state"] = align_compiled_keys(
+                current_model_state, model_keys
+            )
 
         # --- 3. optimizer param-group patching ----------------------------
         #
@@ -424,8 +435,12 @@ class LightningWrapperBase(pl.LightningModule):
             torch.cuda.synchronize()
 
             # Calculate times in milliseconds
-            forward_time_ms = self._cuda_start_event.elapsed_time(self._cuda_forward_end_event)
-            backward_time_ms = self._cuda_forward_end_event.elapsed_time(self._cuda_backward_end_event)
+            forward_time_ms = self._cuda_start_event.elapsed_time(
+                self._cuda_forward_end_event
+            )
+            backward_time_ms = self._cuda_forward_end_event.elapsed_time(
+                self._cuda_backward_end_event
+            )
 
             self._timing_forward_accum += forward_time_ms
             self._timing_backward_accum += backward_time_ms
@@ -445,11 +460,29 @@ class LightningWrapperBase(pl.LightningModule):
             avg_backward_ms = self._timing_backward_accum / self._timing_step_count
             avg_total_ms = avg_forward_ms + avg_backward_ms
 
-            self.log("timing/forward_ms", avg_forward_ms, prog_bar=False, sync_dist=self.distributed)
-            self.log("timing/backward_ms", avg_backward_ms, prog_bar=False, sync_dist=self.distributed)
-            self.log("timing/step_total_ms", avg_total_ms, prog_bar=False, sync_dist=self.distributed)
             self.log(
-                "timing/throughput_steps_per_sec", 1000.0 / avg_total_ms, prog_bar=False, sync_dist=self.distributed
+                "timing/forward_ms",
+                avg_forward_ms,
+                prog_bar=False,
+                sync_dist=self.distributed,
+            )
+            self.log(
+                "timing/backward_ms",
+                avg_backward_ms,
+                prog_bar=False,
+                sync_dist=self.distributed,
+            )
+            self.log(
+                "timing/step_total_ms",
+                avg_total_ms,
+                prog_bar=False,
+                sync_dist=self.distributed,
+            )
+            self.log(
+                "timing/throughput_steps_per_sec",
+                1000.0 / avg_total_ms,
+                prog_bar=False,
+                sync_dist=self.distributed,
             )
 
             # Reset accumulators after logging
@@ -465,7 +498,6 @@ class LightningWrapperBase(pl.LightningModule):
         """Called after backward pass - record timing and log."""
         self._record_backward_end_and_accumulate()
         self._log_timing_if_needed()
-
 
     def configure_optimizers(self):
         """Configure the optimizer and scheduler for training."""
@@ -490,7 +522,10 @@ class LightningWrapperBase(pl.LightningModule):
 
     def on_before_optimizer_step(self, optimizer):
         """Log the gradient norm before the optimizer step every `grad_norm_interval` steps."""
-        if self.should_track_grad_norm and self.global_step % self.grad_norm_interval == 0:
+        if (
+            self.should_track_grad_norm
+            and self.global_step % self.grad_norm_interval == 0
+        ):
             self.log_dict(grad_norm(self, norm_type=2))
 
     def on_fit_start(self):

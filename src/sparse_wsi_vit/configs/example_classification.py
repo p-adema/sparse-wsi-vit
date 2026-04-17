@@ -9,8 +9,15 @@ Usage:
 
 import torch
 
-from sparse_wsi_vit.experiments.default_cfg import ExperimentConfig, SchedulerConfig, TrainConfig, WandbConfig
-from sparse_wsi_vit.experiments.lightning_wrappers.classification_wrapper import ClassificationWrapper
+from sparse_wsi_vit.experiments.default_cfg import (
+    ExperimentConfig,
+    SchedulerConfig,
+    TrainConfig,
+    WandbConfig,
+)
+from sparse_wsi_vit.experiments.lightning_wrappers.classification_wrapper import (
+    ClassificationWrapper,
+)
 from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
 
 

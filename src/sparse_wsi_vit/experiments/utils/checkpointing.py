@@ -46,7 +46,9 @@ def _select_artifact_with_alias(artifacts, alias: Literal["best", "latest"]):
     return None
 
 
-def download_checkpoint(run_path: str, alias: Literal["best", "latest"] = "best") -> str:
+def download_checkpoint(
+    run_path: str, alias: Literal["best", "latest"] = "best"
+) -> str:
     """Download the checkpoint files from the Weights & Biases artifact marked with a given alias (default: "best").
 
     Args:
@@ -84,7 +86,9 @@ def download_checkpoint(run_path: str, alias: Literal["best", "latest"] = "best"
     # Find checkpoint file(s)
     ckpt_files = sorted(artifact_dir.rglob("*.ckpt"))
     if not ckpt_files:
-        raise ValueError(f"No .ckpt files found in artifact '{artifact.name}:{alias}' at {artifact_dir}.")
+        raise ValueError(
+            f"No .ckpt files found in artifact '{artifact.name}:{alias}' at {artifact_dir}."
+        )
 
     # Heuristic: pick the most recent file by modification time
     ckpt_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
@@ -98,7 +102,11 @@ def load_checkpoint_state_dict(ckpt_path: str) -> dict:
     torch.save(state_dict) style checkpoints.
     """
     obj = torch.load(ckpt_path, map_location="cpu")
-    if isinstance(obj, dict) and "state_dict" in obj and isinstance(obj["state_dict"], dict):
+    if (
+        isinstance(obj, dict)
+        and "state_dict" in obj
+        and isinstance(obj["state_dict"], dict)
+    ):
         return obj["state_dict"]
     if isinstance(obj, dict):
         return obj
@@ -113,7 +121,9 @@ def _compute_overlapping_slices(target_shape, source_shape):
     return target_slices, source_slices
 
 
-def load_state_dict_partially(model: torch.nn.Module, state_dict: Dict[str, torch.Tensor]) -> None:
+def load_state_dict_partially(
+    model: torch.nn.Module, state_dict: Dict[str, torch.Tensor]
+) -> None:
     """Load checkpoint tensors into model with partial overlap support.
 
     Behavior:
@@ -130,11 +140,15 @@ def load_state_dict_partially(model: torch.nn.Module, state_dict: Dict[str, torc
     missing_in_ckpt = sorted(model_keys - ckpt_keys)
     unexpected_in_ckpt = sorted(ckpt_keys - model_keys)
     if missing_in_ckpt:
-        print(f"[resume/partial] Missing model keys (not found in checkpoint): {len(missing_in_ckpt)}")
+        print(
+            f"[resume/partial] Missing model keys (not found in checkpoint): {len(missing_in_ckpt)}"
+        )
         for k in missing_in_ckpt:
             print(f"  - {k}")
     if unexpected_in_ckpt:
-        print(f"[resume/partial] Unexpected checkpoint keys (ignored): {len(unexpected_in_ckpt)}")
+        print(
+            f"[resume/partial] Unexpected checkpoint keys (ignored): {len(unexpected_in_ckpt)}"
+        )
         for k in unexpected_in_ckpt:
             print(f"  - {k}")
 
@@ -150,12 +164,16 @@ def load_state_dict_partially(model: torch.nn.Module, state_dict: Dict[str, torc
 
         target_tensor = model_state[key]
 
-        if not isinstance(source_tensor, torch.Tensor) or not isinstance(target_tensor, torch.Tensor):
+        if not isinstance(source_tensor, torch.Tensor) or not isinstance(
+            target_tensor, torch.Tensor
+        ):
             ignored_non_tensor += 1
             continue
 
         # Ensure dtype/device compatibility for copy; cast source to target dtype
-        source_tensor = source_tensor.to(dtype=target_tensor.dtype, device=target_tensor.device)
+        source_tensor = source_tensor.to(
+            dtype=target_tensor.dtype, device=target_tensor.device
+        )
 
         if target_tensor.shape == source_tensor.shape:
             # Direct copy
@@ -163,8 +181,12 @@ def load_state_dict_partially(model: torch.nn.Module, state_dict: Dict[str, torc
             loaded_exact += 1
         else:
             # Partial overlapping copy
-            target_slices, source_slices = _compute_overlapping_slices(target_tensor.shape, source_tensor.shape)
-            if len(target_slices) != len(target_tensor.shape) or len(source_slices) != len(source_tensor.shape):
+            target_slices, source_slices = _compute_overlapping_slices(
+                target_tensor.shape, source_tensor.shape
+            )
+            if len(target_slices) != len(target_tensor.shape) or len(
+                source_slices
+            ) != len(source_tensor.shape):
                 continue
             common_sizes = [s.stop for s in target_slices]
             dim_desc = ", ".join(str(n) for n in common_sizes)
@@ -177,7 +199,9 @@ def load_state_dict_partially(model: torch.nn.Module, state_dict: Dict[str, torc
             )
             target_tensor[target_slices].copy_(source_tensor[source_slices])
             loaded_partial += 1
-    total_ckpt_tensors = sum(1 for v in state_dict.values() if isinstance(v, torch.Tensor))
+    total_ckpt_tensors = sum(
+        1 for v in state_dict.values() if isinstance(v, torch.Tensor)
+    )
     print(
         f"[resume/partial] Summary: exact_loaded={loaded_exact}, partial_loaded={loaded_partial}, "
         f"ignored_missing_in_model={ignored_missing_in_model}, ignored_non_tensor={ignored_non_tensor}, "
@@ -205,7 +229,9 @@ def preview_state_dict_compatibility(
     missing_in_ckpt = sorted(model_keys - ckpt_keys)
     unexpected_in_ckpt = sorted(ckpt_keys - model_keys)
 
-    print(f"[resume/compat] Model params/buffers: {len(model_keys)} | Checkpoint entries: {len(ckpt_keys)}")
+    print(
+        f"[resume/compat] Model params/buffers: {len(model_keys)} | Checkpoint entries: {len(ckpt_keys)}"
+    )
     if missing_in_ckpt:
         print(f"[resume/compat] Missing in checkpoint: {len(missing_in_ckpt)}")
         for k in missing_in_ckpt[:max_list]:
@@ -225,7 +251,9 @@ def preview_state_dict_compatibility(
     for k in intersect:
         v_model = model_state[k]
         v_ckpt = state_dict[k]
-        if not isinstance(v_model, torch.Tensor) or not isinstance(v_ckpt, torch.Tensor):
+        if not isinstance(v_model, torch.Tensor) or not isinstance(
+            v_ckpt, torch.Tensor
+        ):
             continue
         if tuple(v_model.shape) == tuple(v_ckpt.shape):
             exact += 1
@@ -282,12 +310,16 @@ class WandbSelectiveCheckpointUploader(pl_callbacks.Callback):
         try:
             file_hash = self._file_sha256(path)
         except Exception as e:
-            print(f"[checkpoint/upload][warn] Failed to hash '{path}' for alias='{alias}': {e}; proceeding to upload")
+            print(
+                f"[checkpoint/upload][warn] Failed to hash '{path}' for alias='{alias}': {e}; proceeding to upload"
+            )
             file_hash = None
 
         last_hash = self._uploaded_hashes.get(alias)
         if file_hash is not None and last_hash == file_hash:
-            print(f"[checkpoint/upload] Content unchanged for alias='{alias}', skipping upload of '{path}'")
+            print(
+                f"[checkpoint/upload] Content unchanged for alias='{alias}', skipping upload of '{path}'"
+            )
             return
         art = wandb.Artifact(name=f"model-{run.id}", type="model")
         art.add_file(path)
@@ -310,9 +342,13 @@ class WandbSelectiveCheckpointUploader(pl_callbacks.Callback):
                 locator = f"{entity}/{project}/{artifact_name}"
                 try:
                     versions = list(api.artifact_versions("model", locator))
-                    print(f"[checkpoint/prune] Using artifact_versions for {locator} → {len(versions)} versions")
+                    print(
+                        f"[checkpoint/prune] Using artifact_versions for {locator} → {len(versions)} versions"
+                    )
                 except Exception as e:
-                    print(f"[checkpoint/prune][warn] artifact_versions lookup failed for {locator}: {e}.")
+                    print(
+                        f"[checkpoint/prune][warn] artifact_versions lookup failed for {locator}: {e}."
+                    )
 
             if not versions:
                 api_run = None
@@ -320,17 +356,24 @@ class WandbSelectiveCheckpointUploader(pl_callbacks.Callback):
                     try:
                         api_run = api.run(f"{entity}/{project}/{run.id}")
                     except Exception as e:
-                        print(f"[checkpoint/prune][warn] api.run lookup failed for {run.id}: {e}.")
+                        print(
+                            f"[checkpoint/prune][warn] api.run lookup failed for {run.id}: {e}."
+                        )
                 if api_run is not None:
                     versions = [
                         a
                         for a in api_run.logged_artifacts()
-                        if isinstance(getattr(a, "name", None), str) and a.name.split(":", 1)[0] == artifact_name
+                        if isinstance(getattr(a, "name", None), str)
+                        and a.name.split(":", 1)[0] == artifact_name
                     ]
-                print(f"[checkpoint/prune] Fallback to logged_artifacts() → {len(versions)} versions")
+                print(
+                    f"[checkpoint/prune] Fallback to logged_artifacts() → {len(versions)} versions"
+                )
 
             if len(versions) <= self.keep_last_k_versions:
-                print(f"[checkpoint/prune] Nothing to prune (have {len(versions)} ≤ keep {self.keep_last_k_versions})")
+                print(
+                    f"[checkpoint/prune] Nothing to prune (have {len(versions)} ≤ keep {self.keep_last_k_versions})"
+                )
                 return
 
             def _ver_num(a):
@@ -347,7 +390,9 @@ class WandbSelectiveCheckpointUploader(pl_callbacks.Callback):
                 if ("best" in aliases) or ("latest" in aliases):
                     alias_protected.add(getattr(a, "id", a))
             if alias_protected:
-                print(f"[checkpoint/prune] Protected by alias (best/latest): {len(alias_protected)}")
+                print(
+                    f"[checkpoint/prune] Protected by alias (best/latest): {len(alias_protected)}"
+                )
 
             to_keep = []
             for a in versions:
@@ -384,7 +429,9 @@ class WandbSelectiveCheckpointUploader(pl_callbacks.Callback):
             def _fmt(a):
                 return f"id={getattr(a, 'id', '?')} ver={getattr(a, 'version', '?')} aliases={','.join(getattr(a, 'aliases', []) or [])}"
 
-            print(f"[checkpoint/prune] Keep count={len(kept)} (budget={self.keep_last_k_versions})")
+            print(
+                f"[checkpoint/prune] Keep count={len(kept)} (budget={self.keep_last_k_versions})"
+            )
             for a in kept[:5]:
                 print(f"  keep: {_fmt(a)}")
             if len(kept) > 5:
@@ -398,7 +445,9 @@ class WandbSelectiveCheckpointUploader(pl_callbacks.Callback):
         except Exception as e:
             print(f"[checkpoint/prune][error] {type(e).__name__}: {e}")
 
-    def on_validation_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+    def on_validation_end(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule
+    ) -> None:
         """Upload selected checkpoints at the end of validation if appropriate."""
         if getattr(trainer, "sanity_checking", False):
             return
@@ -413,24 +462,41 @@ class WandbSelectiveCheckpointUploader(pl_callbacks.Callback):
         if trainer.logger is None or not hasattr(trainer.logger, "experiment"):
             return
         run = trainer.logger.experiment
-        ckpt_cb = next((cb for cb in trainer.callbacks if isinstance(cb, pl_callbacks.ModelCheckpoint)), None)
+        ckpt_cb = next(
+            (
+                cb
+                for cb in trainer.callbacks
+                if isinstance(cb, pl_callbacks.ModelCheckpoint)
+            ),
+            None,
+        )
         if ckpt_cb is None:
-            print("[checkpoint/upload][warn] No ModelCheckpoint callback found; skipping upload")
+            print(
+                "[checkpoint/upload][warn] No ModelCheckpoint callback found; skipping upload"
+            )
             return
         if self.upload_best:
             best_path = getattr(ckpt_cb, "best_model_path", None)
             if best_path:
                 self._maybe_upload(run, best_path, alias="best")
             else:
-                print("[checkpoint/upload][warn] upload_best=True but best_model_path is empty; will retry later")
+                print(
+                    "[checkpoint/upload][warn] upload_best=True but best_model_path is empty; will retry later"
+                )
         if self.upload_last:
-            last_path = getattr(ckpt_cb, "last_model_path", None) or getattr(ckpt_cb, "last_model", None)
+            last_path = getattr(ckpt_cb, "last_model_path", None) or getattr(
+                ckpt_cb, "last_model", None
+            )
             if last_path:
                 self._maybe_upload(run, last_path, alias="latest")
             else:
-                print("[checkpoint/upload][warn] upload_last=True but last_model_path is empty; will retry later")
+                print(
+                    "[checkpoint/upload][warn] upload_last=True but last_model_path is empty; will retry later"
+                )
 
         self._prune_old_versions(run, artifact_name=f"model-{run.id}")
+
+
 def align_compiled_keys(
     state_dict: dict[str, torch.Tensor],
     model_keys: set[str],
@@ -453,6 +519,8 @@ def align_compiled_keys(
 
     model_stripped = {_strip(k): k for k in model_keys}
     return {model_stripped.get(_strip(k), k): v for k, v in state_dict.items()}
+
+
 class WandbSelectiveCheckpointUploader(pl_callbacks.Callback):
     """Upload checkpoints to W&B with per-scheduler-phase best/latest tracking.
 
@@ -501,7 +569,8 @@ class WandbSelectiveCheckpointUploader(pl_callbacks.Callback):
         self._uploaded_hashes: dict[str, str] = {}
         # Per-phase best metric tracking: {phase_name: best_score}
         self._phase_best: dict[str, float] = {
-            name: float("-inf") if mode == "max" else float("inf") for name in self.phase_boundaries
+            name: float("-inf") if mode == "max" else float("inf")
+            for name in self.phase_boundaries
         }
 
     def _current_phase(self, global_step: int) -> str | None:
@@ -538,12 +607,16 @@ class WandbSelectiveCheckpointUploader(pl_callbacks.Callback):
         try:
             file_hash = self._file_sha256(path)
         except Exception as e:
-            print(f"[checkpoint/upload][warn] Failed to hash '{path}' for alias='{alias}': {e}; proceeding to upload")
+            print(
+                f"[checkpoint/upload][warn] Failed to hash '{path}' for alias='{alias}': {e}; proceeding to upload"
+            )
             file_hash = None
 
         last_hash = self._uploaded_hashes.get(alias)
         if file_hash is not None and last_hash == file_hash:
-            print(f"[checkpoint/upload] Content unchanged for alias='{alias}', skipping upload of '{path}'")
+            print(
+                f"[checkpoint/upload] Content unchanged for alias='{alias}', skipping upload of '{path}'"
+            )
             return
         art = wandb.Artifact(name=f"model-{run.id}", type="model")
         art.add_file(path)
@@ -567,9 +640,13 @@ class WandbSelectiveCheckpointUploader(pl_callbacks.Callback):
                 locator = f"{entity}/{project}/{artifact_name}"
                 try:
                     versions = list(api.artifact_versions("model", locator))
-                    print(f"[checkpoint/prune] Using artifact_versions for {locator} → {len(versions)} versions")
+                    print(
+                        f"[checkpoint/prune] Using artifact_versions for {locator} → {len(versions)} versions"
+                    )
                 except Exception as e:
-                    print(f"[checkpoint/prune][warn] artifact_versions lookup failed for {locator}: {e}.")
+                    print(
+                        f"[checkpoint/prune][warn] artifact_versions lookup failed for {locator}: {e}."
+                    )
 
             # Fallback: use artifacts visible from this run only
             if not versions:
@@ -578,17 +655,24 @@ class WandbSelectiveCheckpointUploader(pl_callbacks.Callback):
                     try:
                         api_run = api.run(f"{entity}/{project}/{run.id}")
                     except Exception as e:
-                        print(f"[checkpoint/prune][warn] api.run lookup failed for {run.id}: {e}.")
+                        print(
+                            f"[checkpoint/prune][warn] api.run lookup failed for {run.id}: {e}."
+                        )
                 if api_run is not None:
                     versions = [
                         a
                         for a in api_run.logged_artifacts()
-                        if isinstance(getattr(a, "name", None), str) and a.name.split(":", 1)[0] == artifact_name
+                        if isinstance(getattr(a, "name", None), str)
+                        and a.name.split(":", 1)[0] == artifact_name
                     ]
-                print(f"[checkpoint/prune] Fallback to logged_artifacts() → {len(versions)} versions")
+                print(
+                    f"[checkpoint/prune] Fallback to logged_artifacts() → {len(versions)} versions"
+                )
 
             if len(versions) <= self.keep_last_k_versions:
-                print(f"[checkpoint/prune] Nothing to prune (have {len(versions)} ≤ keep {self.keep_last_k_versions})")
+                print(
+                    f"[checkpoint/prune] Nothing to prune (have {len(versions)} ≤ keep {self.keep_last_k_versions})"
+                )
                 return
 
             def _ver_num(a):
@@ -647,7 +731,9 @@ class WandbSelectiveCheckpointUploader(pl_callbacks.Callback):
             def _fmt(a):
                 return f"id={getattr(a, 'id', '?')} ver={getattr(a, 'version', '?')} aliases={','.join(getattr(a, 'aliases', []) or [])}"
 
-            print(f"[checkpoint/prune] Keep count={len(kept)} (budget={self.keep_last_k_versions})")
+            print(
+                f"[checkpoint/prune] Keep count={len(kept)} (budget={self.keep_last_k_versions})"
+            )
             for a in kept[:5]:
                 print(f"  keep: {_fmt(a)}")
             if len(kept) > 5:
@@ -668,7 +754,9 @@ class WandbSelectiveCheckpointUploader(pl_callbacks.Callback):
             except UnboundLocalError:
                 pass
 
-    def on_validation_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+    def on_validation_end(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule
+    ) -> None:
         """Upload selected checkpoints at the end of validation if appropriate."""
         # Only upload during actual training runs to avoid alias churn during post-training validate
         if getattr(trainer, "sanity_checking", False):
@@ -685,9 +773,18 @@ class WandbSelectiveCheckpointUploader(pl_callbacks.Callback):
         if trainer.logger is None or not hasattr(trainer.logger, "experiment"):
             return
         run = trainer.logger.experiment
-        ckpt_cb = next((cb for cb in trainer.callbacks if isinstance(cb, pl_callbacks.ModelCheckpoint)), None)
+        ckpt_cb = next(
+            (
+                cb
+                for cb in trainer.callbacks
+                if isinstance(cb, pl_callbacks.ModelCheckpoint)
+            ),
+            None,
+        )
         if ckpt_cb is None:
-            print("[checkpoint/upload][warn] No ModelCheckpoint callback found; skipping upload")
+            print(
+                "[checkpoint/upload][warn] No ModelCheckpoint callback found; skipping upload"
+            )
             return
 
         # --- Global best / latest (backward-compatible) -----------------------
@@ -696,19 +793,27 @@ class WandbSelectiveCheckpointUploader(pl_callbacks.Callback):
             if best_path:
                 self._maybe_upload(run, best_path, alias="best")
             else:
-                print("[checkpoint/upload][warn] upload_best=True but best_model_path is empty; will retry later")
+                print(
+                    "[checkpoint/upload][warn] upload_best=True but best_model_path is empty; will retry later"
+                )
         if self.upload_last:
-            last_path = getattr(ckpt_cb, "last_model_path", None) or getattr(ckpt_cb, "last_model", None)
+            last_path = getattr(ckpt_cb, "last_model_path", None) or getattr(
+                ckpt_cb, "last_model", None
+            )
             if last_path:
                 self._maybe_upload(run, last_path, alias="latest")
             else:
-                print("[checkpoint/upload][warn] upload_last=True but last_model_path is empty; will retry later")
+                print(
+                    "[checkpoint/upload][warn] upload_last=True but last_model_path is empty; will retry later"
+                )
 
         # --- Per-phase best / latest ------------------------------------------
         if self.phase_boundaries:
             phase = self._current_phase(trainer.global_step)
             if phase is not None:
-                last_path = getattr(ckpt_cb, "last_model_path", None) or getattr(ckpt_cb, "last_model", None)
+                last_path = getattr(ckpt_cb, "last_model_path", None) or getattr(
+                    ckpt_cb, "last_model", None
+                )
                 if last_path and os.path.isfile(last_path):
                     self._maybe_upload(run, last_path, alias=f"{phase}-latest")
 

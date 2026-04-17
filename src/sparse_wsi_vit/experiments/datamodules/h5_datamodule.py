@@ -18,12 +18,17 @@ def mil_collate_fn(batch: list[dict]) -> dict:
     Returns:
         Dict with keys ``"input"``, ``"label"``, ``"slide_name"``, ``"coords"``.
     """
+    assert len(batch) == 1, (
+        "Some code assumes batch-size 1. We'd need a more elegant fix than tossing them in a list."
+    )
+
     inputs = [b["input"] for b in batch]
     labels = torch.stack([b["label"] for b in batch])
     slide_names = [b["slide_name"] for b in batch]
     coords = [b["coords"] for b in batch]
 
     inputs = torch.stack(inputs, dim=0) if len(inputs) == 1 else inputs
+    coords = torch.stack(coords, dim=0) if len(inputs) == 1 else coords
 
     return {
         "input": inputs,

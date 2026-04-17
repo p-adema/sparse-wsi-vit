@@ -7,10 +7,11 @@ import h5py
 
 class H5FeatureBagDataset(Dataset):
     """
-    A PyTorch Dataset to read slide-level feature bags (N x 1280) from individual 
+    A PyTorch Dataset to read slide-level feature bags (N x 1280) from individual
     HDF5 files produced by the FastPathology extraction pipeline.
     Intended for MIL (Multiple Instance Learning) classification.
     """
+
     def __init__(self, csv_path, features_dir, label_col_name="label", transform=None):
         """
         Args:
@@ -23,19 +24,19 @@ class H5FeatureBagDataset(Dataset):
         self.features_dir = Path(features_dir)
         self.transform = transform
         self.label_col_name = label_col_name
-        
+
         # Load slide-level metadata
         df = pd.read_csv(csv_path)
 
         # Mapping for string to int labels
         self.label_map = {}
-        
+
         # Keep only slides for which the feature .h5 file actually exist
         valid_slides = []
         for idx, row in df.iterrows():
-            slide_name = str(row.get('slidename', row.get('ID')))
+            slide_name = str(row.get("slidename", row.get("ID")))
             h5_path = self.features_dir / f"{slide_name}.h5"
-            
+
             raw_label = row.get(label_col_name)
             if h5_path.exists() and pd.notna(raw_label):
                 # Dynamically map strings to integers if required
@@ -46,12 +47,14 @@ class H5FeatureBagDataset(Dataset):
                 else:
                     mapped_label = int(raw_label)
 
-                valid_slides.append({
-                    "slide_name": slide_name,
-                    "label": mapped_label,
-                    "h5_path": h5_path
-                })
-        
+                valid_slides.append(
+                    {
+                        "slide_name": slide_name,
+                        "label": mapped_label,
+                        "h5_path": h5_path,
+                    }
+                )
+
         self.slides = valid_slides
         print(f"Loaded {len(self.slides)} valid WSI feature bags from {features_dir}")
 
@@ -74,23 +77,23 @@ class H5FeatureBagDataset(Dataset):
         """
         item = self.slides[idx]
         h5_path = item["h5_path"]
-        
+
         with h5py.File(h5_path, "r") as f:
-            features = f["features"][:] # shape: (N_patches, 1280)
-            coords = f["coords"][:]     # shape: (N_patches, 2)
-            
+            features = f["features"][:]  # shape: (N_patches, 1280)
+            coords = f["coords"][:]  # shape: (N_patches, 2)
+
         features_t = torch.from_numpy(features).float()
         coords_t = torch.from_numpy(coords).float()
-        
+
         label = item["label"]
 
         if self.transform is not None:
             features_t = self.transform(features_t)
-        
+
         # Note: MIL models generally expect shape (N, feature_dim).
         return {
-            "input": features_t, 
-            "label": torch.tensor(label, dtype=torch.long), 
-            "slide_name": item["slide_name"], 
-            "coords": coords_t
+            "input": features_t,
+            "label": torch.tensor(label, dtype=torch.long),
+            "slide_name": item["slide_name"],
+            "coords": coords_t,
         }

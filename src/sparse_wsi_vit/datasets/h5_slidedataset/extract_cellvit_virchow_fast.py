@@ -33,7 +33,7 @@ class HuggingFaceVirchowExtractor(nn.Module):
             "hf-hub:paige-ai/Virchow2",
             pretrained=True,
             mlp_layer=SwiGLUPacked,
-            act_layer=torch.nn.SiLU
+            act_layer=torch.nn.SiLU,
         )
         self.model.to(device)
         self.model.eval()
@@ -41,11 +41,17 @@ class HuggingFaceVirchowExtractor(nn.Module):
 
         from timm.data import resolve_data_config
         from timm.data.transforms_factory import create_transform
-        self.transform = create_transform(**resolve_data_config(self.model.pretrained_cfg, model=self.model))
+
+        self.transform = create_transform(
+            **resolve_data_config(self.model.pretrained_cfg, model=self.model)
+        )
 
     def forward(self, x):
         # Using mixed precision inference as recommended for Virchow2
-        with torch.inference_mode(), torch.autocast(device_type="cuda", dtype=torch.float16):
+        with (
+            torch.inference_mode(),
+            torch.autocast(device_type="cuda", dtype=torch.float16),
+        ):
             output = self.model(x)
             class_token = output[:, 0]
 
@@ -63,8 +69,17 @@ class HuggingFaceVirchowExtractor(nn.Module):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--slides_csv", type=Path, required=True)
-    parser.add_argument("--hf_token", type=str, default=None, help="Hugging Face token for paige-ai/Virchow2")
-    parser.add_argument("--concat_tokens", action="store_true", help="Return 2560-dim features (CLS + mean patch) instead of 1280-dim (CLS only)")
+    parser.add_argument(
+        "--hf_token",
+        type=str,
+        default=None,
+        help="Hugging Face token for paige-ai/Virchow2",
+    )
+    parser.add_argument(
+        "--concat_tokens",
+        action="store_true",
+        help="Return 2560-dim features (CLS + mean patch) instead of 1280-dim (CLS only)",
+    )
     parser.add_argument("--output_dir", type=Path, required=True)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--device", type=str, default="cuda:0")
@@ -75,16 +90,18 @@ def main():
     df = pd.read_csv(args.slides_csv)
     device = torch.device(args.device)
 
-    model = HuggingFaceVirchowExtractor(args.hf_token, device, concat_tokens=args.concat_tokens)
+    model = HuggingFaceVirchowExtractor(
+        args.hf_token, device, concat_tokens=args.concat_tokens
+    )
     magnification = int(MPP_TO_MAG_FACTOR / args.target_mpp)
 
     for idx, row in df.iterrows():
-        slide_path_val = row.get('slidepath', row.get('path'))
+        slide_path_val = row.get("slidepath", row.get("path"))
         if pd.isna(slide_path_val) or not str(slide_path_val).strip():
             continue
 
         slide_path = Path(slide_path_val)
-        slide_name = row['slidename']
+        slide_name = row["slidename"]
 
         out_file = args.output_dir / f"{slide_name}.h5"
         partial_file = args.output_dir / f"{slide_name}.partial"
@@ -116,18 +133,21 @@ def main():
             pbar = tqdm(desc=f"Extracting {slide_name}")
 
             with h5py.File(partial_file, "w") as hf:
+
                 def _write_batch(feats_np: np.ndarray, coords_np: np.ndarray) -> None:
                     """Append one batch of features and coords to the open HDF5 file."""
                     nonlocal feat_ds, coord_ds, n_written
                     n = len(feats_np)
                     if feat_ds is None:
                         feat_ds = hf.create_dataset(
-                            "features", data=feats_np,
+                            "features",
+                            data=feats_np,
                             maxshape=(None, feats_np.shape[1]),
                             compression="gzip",
                         )
                         coord_ds = hf.create_dataset(
-                            "coords", data=coords_np,
+                            "coords",
+                            data=coords_np,
                             maxshape=(None, 2),
                             compression="gzip",
                         )

@@ -28,7 +28,10 @@ import pytest
 import torch
 import torch.nn as nn
 
-from sparse_wsi_vit.experiments.utils.checkpointing import WandbSelectiveCheckpointUploader, align_compiled_keys
+from sparse_wsi_vit.experiments.utils.checkpointing import (
+    WandbSelectiveCheckpointUploader,
+    align_compiled_keys,
+)
 from sparse_wsi_vit.modules.schedulers import ResumableSequentialLR
 
 
@@ -52,7 +55,9 @@ def _make_wrapper():
     from dataclasses import fields
 
     from sparse_wsi_vit.experiments.default_cfg import ExperimentConfig
-    from sparse_wsi_vit.experiments.lightning_wrappers.classification_wrapper import ClassificationWrapper
+    from sparse_wsi_vit.experiments.lightning_wrappers.classification_wrapper import (
+        ClassificationWrapper,
+    )
     from sparse_wsi_vit.lazy_config import LazyConfig
 
     cfg = ExperimentConfig()
@@ -119,7 +124,10 @@ class TestEMAKeyRemap:
     @staticmethod
     def _add_orig_mod(state_dict: dict) -> dict:
         """Simulate keys produced by torch.compile (adds ``._orig_mod.`` segment)."""
-        return {k.replace("network.", "network._orig_mod.", 1): v for k, v in state_dict.items()}
+        return {
+            k.replace("network.", "network._orig_mod.", 1): v
+            for k, v in state_dict.items()
+        }
 
     def test_state_dict_remap_compiled_to_plain(self):
         """Checkpoint from compiled model loaded into non-compiled model."""
@@ -185,7 +193,10 @@ def _make_optimizer(lr=0.004, num_groups=1):
     lr/3, ...) so that tests verify per-group LR restoration, not just a
     single shared value.
     """
-    params = [{"params": [torch.nn.Parameter(torch.zeros(1))], "lr": lr / (i + 1)} for i in range(num_groups)]
+    params = [
+        {"params": [torch.nn.Parameter(torch.zeros(1))], "lr": lr / (i + 1)}
+        for i in range(num_groups)
+    ]
     return torch.optim.SGD(params)
 
 
@@ -203,11 +214,15 @@ def _make_cosine_scheduler(lr=0.004, warmup=50, total=500, eta_min=0.0, num_grou
         T_max=total - warmup,
         eta_min=eta_min,
     )
-    seq = ResumableSequentialLR(opt, schedulers=[warmup_sched, cosine_sched], milestones=[warmup])
+    seq = ResumableSequentialLR(
+        opt, schedulers=[warmup_sched, cosine_sched], milestones=[warmup]
+    )
     return opt, seq
 
 
-def _make_wsd_scheduler(lr=0.004, warmup=50, stable=200, total=500, eta_min=0.0, num_groups=1):
+def _make_wsd_scheduler(
+    lr=0.004, warmup=50, stable=200, total=500, eta_min=0.0, num_groups=1
+):
     """Create a warmup+stable+decay scheduler matching construct_scheduler's WSD path."""
     opt = _make_optimizer(lr=lr, num_groups=num_groups)
     decay_iters = total - warmup - stable
@@ -218,7 +233,9 @@ def _make_wsd_scheduler(lr=0.004, warmup=50, stable=200, total=500, eta_min=0.0,
         end_factor=1.0,
         total_iters=warmup,
     )
-    stable_sched = torch.optim.lr_scheduler.ConstantLR(opt, factor=1.0, total_iters=stable)
+    stable_sched = torch.optim.lr_scheduler.ConstantLR(
+        opt, factor=1.0, total_iters=stable
+    )
     decay_sched = torch.optim.lr_scheduler.LinearLR(
         opt,
         start_factor=1.0,
@@ -263,7 +280,9 @@ def _roundtrip_at(make_fn, resume_step, check_steps=50, **kwargs):
             max_diffs[g] = max(max_diffs[g], diff)
 
     for g, md in enumerate(max_diffs):
-        assert md < 1e-12, f"LR diverged in group {g} after resume at step {resume_step}: max_diff={md}"
+        assert md < 1e-12, (
+            f"LR diverged in group {g} after resume at step {resume_step}: max_diff={md}"
+        )
 
 
 class TestResumableSequentialLR:
@@ -273,7 +292,9 @@ class TestResumableSequentialLR:
     def test_cosine_roundtrip(self, resume_step):
         _roundtrip_at(_make_cosine_scheduler, resume_step)
 
-    @pytest.mark.parametrize("resume_step", [0, 25, 49, 50, 51, 150, 249, 250, 251, 350, 450, 499])
+    @pytest.mark.parametrize(
+        "resume_step", [0, 25, 49, 50, 51, 150, 249, 250, 251, 350, 450, 499]
+    )
     def test_wsd_roundtrip(self, resume_step):
         _roundtrip_at(_make_wsd_scheduler, resume_step)
 
@@ -281,10 +302,14 @@ class TestResumableSequentialLR:
         _roundtrip_at(_make_cosine_scheduler, resume_step=100, warmup=0, total=500)
 
     def test_wsd_no_warmup(self):
-        _roundtrip_at(_make_wsd_scheduler, resume_step=100, warmup=0, stable=200, total=500)
+        _roundtrip_at(
+            _make_wsd_scheduler, resume_step=100, warmup=0, stable=200, total=500
+        )
 
     def test_wsd_no_stable(self):
-        _roundtrip_at(_make_wsd_scheduler, resume_step=100, warmup=50, stable=0, total=500)
+        _roundtrip_at(
+            _make_wsd_scheduler, resume_step=100, warmup=50, stable=0, total=500
+        )
 
     def test_nonzero_eta_min(self):
         _roundtrip_at(_make_cosine_scheduler, resume_step=300, eta_min=1e-5)
@@ -313,7 +338,9 @@ class TestResumableSequentialLR:
         opt = torch.optim.SGD([torch.nn.Parameter(torch.zeros(1))], lr=0.1)
         w = torch.optim.lr_scheduler.LinearLR(opt, start_factor=0.01, total_iters=10)
         c = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=90, eta_min=0.001)
-        seq = torch.optim.lr_scheduler.SequentialLR(opt, schedulers=[w, c], milestones=[10])
+        seq = torch.optim.lr_scheduler.SequentialLR(
+            opt, schedulers=[w, c], milestones=[10]
+        )
 
         for _ in range(50):
             seq.step()
@@ -323,7 +350,9 @@ class TestResumableSequentialLR:
         opt2 = torch.optim.SGD([torch.nn.Parameter(torch.zeros(1))], lr=0.1)
         w2 = torch.optim.lr_scheduler.LinearLR(opt2, start_factor=0.01, total_iters=10)
         c2 = torch.optim.lr_scheduler.CosineAnnealingLR(opt2, T_max=90, eta_min=0.001)
-        seq2 = torch.optim.lr_scheduler.SequentialLR(opt2, schedulers=[w2, c2], milestones=[10])
+        seq2 = torch.optim.lr_scheduler.SequentialLR(
+            opt2, schedulers=[w2, c2], milestones=[10]
+        )
         seq2.load_state_dict(sd)
 
         restored_lr = opt2.param_groups[0]["lr"]
@@ -350,7 +379,10 @@ class TestSchedulerPhaseBoundaries:
     """Verify ``_scheduler_phase_boundaries`` helper in trainer.py."""
 
     def test_wsd_boundaries(self):
-        from sparse_wsi_vit.experiments.default_cfg import ExperimentConfig, SchedulerConfig
+        from sparse_wsi_vit.experiments.default_cfg import (
+            ExperimentConfig,
+            SchedulerConfig,
+        )
         from sparse_wsi_vit.experiments.trainer import _scheduler_phase_boundaries
 
         cfg = ExperimentConfig()
@@ -365,7 +397,10 @@ class TestSchedulerPhaseBoundaries:
         assert boundaries == {"stable": (1000, 7000), "decay": (7000, 10000)}
 
     def test_cosine_boundaries(self):
-        from sparse_wsi_vit.experiments.default_cfg import ExperimentConfig, SchedulerConfig
+        from sparse_wsi_vit.experiments.default_cfg import (
+            ExperimentConfig,
+            SchedulerConfig,
+        )
         from sparse_wsi_vit.experiments.trainer import _scheduler_phase_boundaries
 
         cfg = ExperimentConfig()
@@ -379,7 +414,10 @@ class TestSchedulerPhaseBoundaries:
         assert boundaries == {"cosine": (1000, 20000)}
 
     def test_constant_boundaries(self):
-        from sparse_wsi_vit.experiments.default_cfg import ExperimentConfig, SchedulerConfig
+        from sparse_wsi_vit.experiments.default_cfg import (
+            ExperimentConfig,
+            SchedulerConfig,
+        )
         from sparse_wsi_vit.experiments.trainer import _scheduler_phase_boundaries
 
         cfg = ExperimentConfig()
@@ -393,7 +431,10 @@ class TestSchedulerPhaseBoundaries:
         assert boundaries == {"constant": (100, 5000)}
 
     def test_unknown_scheduler_returns_empty(self):
-        from sparse_wsi_vit.experiments.default_cfg import ExperimentConfig, SchedulerConfig
+        from sparse_wsi_vit.experiments.default_cfg import (
+            ExperimentConfig,
+            SchedulerConfig,
+        )
         from sparse_wsi_vit.experiments.trainer import _scheduler_phase_boundaries
 
         cfg = ExperimentConfig()

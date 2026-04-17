@@ -7,9 +7,13 @@ import pytorch_lightning as pl
 import torch
 from pytorch_lightning import callbacks as pl_callbacks
 
-from sparse_wsi_vit.experiments.callbacks.wandb_cache_cleanup import WandbCacheCleanupCallback
+from sparse_wsi_vit.experiments.callbacks.wandb_cache_cleanup import (
+    WandbCacheCleanupCallback,
+)
 from sparse_wsi_vit.experiments.default_cfg import ExperimentConfig
-from sparse_wsi_vit.experiments.utils.checkpointing import WandbSelectiveCheckpointUploader
+from sparse_wsi_vit.experiments.utils.checkpointing import (
+    WandbSelectiveCheckpointUploader,
+)
 from sparse_wsi_vit.experiments.utils.lazy_config import instantiate
 
 
@@ -36,7 +40,6 @@ def _scheduler_phase_boundaries(cfg: ExperimentConfig) -> dict[str, tuple[int, i
     if name == "constant":
         return {"constant": (warmup_end, total)}
     return {}
-
 
 
 def construct_trainer(
@@ -103,7 +106,9 @@ def construct_trainer(
         sync_batchnorm = False
 
     # Merge default callbacks with any experiment-defined callbacks
-    user_callbacks = [instantiate(cb_cfg) for cb_cfg in cfg.callbacks] if cfg.callbacks else []
+    user_callbacks = (
+        [instantiate(cb_cfg) for cb_cfg in cfg.callbacks] if cfg.callbacks else []
+    )
 
     callbacks_list = [
         # Checkpoint callback

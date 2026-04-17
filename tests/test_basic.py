@@ -85,7 +85,9 @@ def test_experiment_config_creation() -> None:
 
 def test_callbacks_import() -> None:
     """Test that callbacks can be imported."""
-    from sparse_wsi_vit.experiments.callbacks.wandb_cache_cleanup import WandbCacheCleanupCallback
+    from sparse_wsi_vit.experiments.callbacks.wandb_cache_cleanup import (
+        WandbCacheCleanupCallback,
+    )
 
     assert WandbCacheCleanupCallback is not None
 
@@ -116,8 +118,12 @@ def test_cli_import() -> None:
 
 def test_lightning_wrappers_import() -> None:
     """Test that lightning wrappers can be imported."""
-    from sparse_wsi_vit.experiments.lightning_wrappers.base_lightning_wrapper import LightningWrapperBase
-    from sparse_wsi_vit.experiments.lightning_wrappers.classification_wrapper import ClassificationWrapper
+    from sparse_wsi_vit.experiments.lightning_wrappers.base_lightning_wrapper import (
+        LightningWrapperBase,
+    )
+    from sparse_wsi_vit.experiments.lightning_wrappers.classification_wrapper import (
+        ClassificationWrapper,
+    )
 
     assert LightningWrapperBase is not None
     assert ClassificationWrapper is not None
