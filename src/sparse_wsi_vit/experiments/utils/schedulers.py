@@ -42,7 +42,9 @@ class ChainedScheduler(torch.optim.lr_scheduler._LRScheduler):
             if schedulers[scheduler_idx].optimizer != schedulers[0].optimizer:
                 raise ValueError(
                     "ChainedScheduler expects all schedulers to belong to the same optimizer, but "
-                    "got schedulers at index {} and {} to be different".format(0, scheduler_idx)
+                    "got schedulers at index {} and {} to be different".format(
+                        0, scheduler_idx
+                    )
                 )
         self._schedulers = list(schedulers)
         self.optimizer = self._schedulers[0].optimizer
@@ -59,7 +61,11 @@ class ChainedScheduler(torch.optim.lr_scheduler._LRScheduler):
         is not the optimizer.
         The wrapped scheduler states will also be saved.
         """
-        state_dict = {key: value for key, value in self.__dict__.items() if key not in ("optimizer", "_schedulers")}
+        state_dict = {
+            key: value
+            for key, value in self.__dict__.items()
+            if key not in ("optimizer", "_schedulers")
+        }
         state_dict["_schedulers"] = [None] * len(self._schedulers)
 
         for idx, s in enumerate(self._schedulers):

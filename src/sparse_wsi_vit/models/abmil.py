@@ -29,13 +29,9 @@ class ABMIL(nn.Module):
         self.out_features = out_features
         self.in_features = in_features
 
-        self.attention_v = nn.Sequential(
-            nn.Linear(in_features, hidden_dim),
-            nn.Tanh()
-        )
+        self.attention_v = nn.Sequential(nn.Linear(in_features, hidden_dim), nn.Tanh())
         self.attention_u = nn.Sequential(
-            nn.Linear(in_features, hidden_dim),
-            nn.Sigmoid()
+            nn.Linear(in_features, hidden_dim), nn.Sigmoid()
         )
         self.attention_weights = nn.Linear(hidden_dim, num_branches)
 
@@ -43,7 +39,7 @@ class ABMIL(nn.Module):
             nn.Linear(in_features * num_branches, in_features // 2),
             nn.ReLU(),
             nn.Dropout(attention_dropout),
-            nn.Linear(in_features // 2, out_features)
+            nn.Linear(in_features // 2, out_features),
         )
 
     def forward(self, x: torch.Tensor, return_attention: bool = False) -> dict:
@@ -66,7 +62,9 @@ class ABMIL(nn.Module):
                 not match ``in_features``.
         """
         if x.dim() not in (2, 3):
-            raise ValueError(f"Expected 2-D (N, D) or 3-D (B, N, D) input, got {x.dim()}-D tensor.")
+            raise ValueError(
+                f"Expected 2-D (N, D) or 3-D (B, N, D) input, got {x.dim()}-D tensor."
+            )
 
         # Ensure batch dimension
         if x.dim() == 2:
@@ -79,17 +77,17 @@ class ABMIL(nn.Module):
             )
 
         # Gated attention
-        a_v = self.attention_v(x)                  # (B, N, hidden_dim)
-        a_u = self.attention_u(x)                  # (B, N, hidden_dim)
-        a = self.attention_weights(a_v * a_u)      # (B, N, num_branches)
-        a = torch.transpose(a, 1, 2)               # (B, num_branches, N)
-        a = F.softmax(a, dim=2)                    # (B, num_branches, N)
+        a_v = self.attention_v(x)  # (B, N, hidden_dim)
+        a_u = self.attention_u(x)  # (B, N, hidden_dim)
+        a = self.attention_weights(a_v * a_u)  # (B, N, num_branches)
+        a = torch.transpose(a, 1, 2)  # (B, num_branches, N)
+        a = F.softmax(a, dim=2)  # (B, num_branches, N)
 
         # Aggregate
-        M = torch.bmm(a, x)                        # (B, num_branches, D)
-        M = M.view(B, -1)                          # (B, num_branches * D)
+        M = torch.bmm(a, x)  # (B, num_branches, D)
+        M = M.view(B, -1)  # (B, num_branches * D)
 
-        logits = self.classifier(M)                # (B, out_features)
+        logits = self.classifier(M)  # (B, out_features)
 
         out = {"logits": logits}
         if return_attention:

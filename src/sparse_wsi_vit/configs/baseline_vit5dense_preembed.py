@@ -15,15 +15,15 @@ from sparse_wsi_vit.experiments.default_cfg import (
 )
 from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
 
-from sparse_wsi_vit.models.abmil import ABMIL
-from sparse_wsi_vit.experiments.lightning_wrappers.mil_wrapper import MILWrapper
+from sparse_wsi_vit.models.vit5_dense import VitDensePreEmbedded
+from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import (
+    WSIAttnWrapper,
+)
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 
 # ─── Data Details ──────────────────────────────────────────────
-CSV_BASE = "/media/davidwessels/ananas/data/David-SELECT-AI/csvs/multibiomarker"
-FEATURES_DIR = (
-    "/media/davidwessels/ananas/data/David-SELECT-AI/outputs/virchow_tissue_features"
-)
+CSV_BASE = "../amc-data"
+FEATURES_DIR = "../amc-data"
 
 # ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1  # Standard for MIL bags
@@ -48,25 +48,25 @@ def get_config() -> ExperimentConfig:
     config.dataset = LazyConfig(
         H5FeatureBagDataModule
     )(
-        train_csv=f"{CSV_BASE}/combined_tcga_amc_part1.csv",
-        val_csv=f"{CSV_BASE}/combined_tcga_amc_part1.csv",  # Replace with actual val split!
+        train_csv=f"{CSV_BASE}/combined_tcga_amc.csv",
+        val_csv=f"{CSV_BASE}/combined_tcga_amc.csv",  # TODO: Replace with actual val split!
         features_dir=FEATURES_DIR,
         label_col_name="tmb_binary",  # Changed from 'label' to an actual column present in the CSV
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
     )
 
-    # Network: The Standard AB-MIL baseline written natively for 1280-dim CLS tokens
-    config.net = LazyConfig(ABMIL)(
+    # Network: The very sketchy ViT-5/Small network
+    config.net = LazyConfig(VitDensePreEmbedded)(
         in_features=IN_FEATURES,
-        hidden_dim=256,
         out_features=OUT_FEATURES,
-        num_branches=1,
     )
 
     # Lightning wrapper mappings
-    config.lightning_wrapper_class = LazyConfig(MILWrapper)(
-        use_bce_loss=(OUT_FEATURES == 1)
+    config.lightning_wrapper_class = LazyConfig(WSIAttnWrapper)(
+        use_bce_loss=(OUT_FEATURES == 1),
+        training_crop_tokens=2**13 - 5,  # 8187 (+ CLS + 4REG = 2**13),
+        # training_compile=True,
     )
 
     # Optimizer

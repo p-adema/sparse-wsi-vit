@@ -19,5 +19,9 @@ def dtype_fixture(request):
     Returns the torch dtype directly. Tests can check tensor.dtype if needed
     for dtype-specific logic (e.g., setting tolerances).
     """
-    dtype_map = {"float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32}
+    dtype_map = {
+        "float16": torch.float16,
+        "bfloat16": torch.bfloat16,
+        "float32": torch.float32,
+    }
     return dtype_map[request.param]

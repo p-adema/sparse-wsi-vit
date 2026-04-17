@@ -108,6 +108,8 @@ class ExperimentConfig:
     trainer: TrainerConfig = field(default_factory=TrainerConfig)
     wandb: WandbConfig = field(default_factory=WandbConfig)
 
-    resume_from_checkpoint: ResumeFromCheckpointConfig = field(default_factory=ResumeFromCheckpointConfig)
+    resume_from_checkpoint: ResumeFromCheckpointConfig = field(
+        default_factory=ResumeFromCheckpointConfig
+    )
     autoresume: AutoResumeConfig = field(default_factory=AutoResumeConfig)
     callbacks: list[LazyConfig] = field(default_factory=list)

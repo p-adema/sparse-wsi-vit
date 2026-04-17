@@ -7,24 +7,26 @@ from sparse_wsi_vit.experiments.lightning_wrappers.base_lightning_wrapper import
 )
 
 
-class MILWrapper(LightningWrapperBase):
-    """Lightning wrapper for Multiple Instance Learning (MIL) classification tasks."""
+class WSIAttnWrapper(LightningWrapperBase):
+    """Lightning wrapper for global attention on WSIs, cropping into training images."""
 
     def __init__(
         self,
         network: torch.nn.Module,
         cfg: ExperimentConfig,
         use_bce_loss: bool = True,
+        training_crop_tokens: int | None = None,
     ):
-        """Initialize the MILWrapper.
+        """Initialize the WSIAttnWrapper.
 
         Args:
-            network: MIL network to wrap. Must expose an ``out_features`` attribute
+            network: WSIAttn network to wrap. Must expose an ``out_features`` attribute
                 when used for multiclass classification.
             cfg: Experiment configuration.
             use_bce_loss: Use BCEWithLogitsLoss for binary classification.
                 When *network.out_features* > 1 and this is False, CrossEntropyLoss
                 is used instead.
+            training_crop_tokens: Crop training inputs to this many tokens.
         """
         super().__init__(network=network, cfg=cfg)
 
@@ -39,13 +41,16 @@ class MILWrapper(LightningWrapperBase):
         self.val_acc = torchmetrics.Accuracy(**acc_kwargs)
 
         self.use_bce_loss = use_bce_loss
+        self.training_crop_tokens = training_crop_tokens
         if self.multiclass and not self.use_bce_loss:
             self.loss_metric = torch.nn.CrossEntropyLoss()
         else:
             self.loss_metric = torch.nn.BCEWithLogitsLoss()
 
     def _step(
-        self, batch: dict[str, torch.Tensor], accuracy_calculator: torchmetrics.Metric
+        self,
+        batch: dict[str, torch.Tensor],
+        accuracy_calculator: torchmetrics.Metric,
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
         """Shared forward + loss computation for train and validation.
 
@@ -57,9 +62,10 @@ class MILWrapper(LightningWrapperBase):
             A 3-tuple of ``(loss, predictions, output_dict)``.
         """
         inputs = batch["input"]
+        coords = batch["coords"]
         labels = batch["label"]
 
-        output_dict = self.network(inputs)
+        output_dict = self.network(inputs, coords)
         logits = output_dict["logits"].squeeze(1)
 
         if not self.multiclass and self.use_bce_loss:
@@ -84,6 +90,27 @@ class MILWrapper(LightningWrapperBase):
         Returns:
             Scalar training loss.
         """
+        n_tokens = batch["coords"].size(-2)
+        if (
+            self.training_crop_tokens is not None
+            and n_tokens > self.training_crop_tokens
+        ):
+            centre = torch.randint(0, n_tokens, (1,), device="cuda")
+            diffs = batch["coords"] - batch["coords"][..., centre, :]
+            distances = torch.linalg.norm(diffs, dim=-1)
+            closest = torch.topk(
+                distances,
+                self.training_crop_tokens,
+                dim=-1,
+                largest=False,
+                sorted=False,
+            ).indices.squeeze()
+            assert closest.shape == (self.training_crop_tokens,), (
+                f"Strange {closest.shape=}, maybe batched?"
+            )
+            batch["coords"] = batch["coords"][:, closest]
+            batch["input"] = batch["input"][:, closest]
+
         loss, _, _ = self._step(batch, self.train_acc)
         self.log(
             "train/loss",

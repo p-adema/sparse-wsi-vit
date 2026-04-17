@@ -12,6 +12,7 @@ from sparse_wsi_vit.models.abmil import ABMIL
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_binary_wrapper() -> MILWrapper:
     net = ABMIL(in_features=64, hidden_dim=32, out_features=1, num_branches=1)
     cfg = ExperimentConfig()
@@ -34,6 +35,7 @@ def _make_batch(n_patches: int = 20, feature_dim: int = 64, label: int = 1) -> d
 # ---------------------------------------------------------------------------
 # Initialization
 # ---------------------------------------------------------------------------
+
 
 def test_binary_wrapper_init():
     """Binary wrapper uses BCEWithLogitsLoss and the binary accuracy metric."""
@@ -60,6 +62,7 @@ def test_multiclass_bce_wrapper_init():
 # ---------------------------------------------------------------------------
 # _step (shared forward + loss, no Lightning logging)
 # ---------------------------------------------------------------------------
+
 
 def test_binary_step_returns_scalar_loss():
     """Binary _step should return a scalar loss and integer predictions."""
@@ -97,6 +100,7 @@ def test_step_accumulates_accuracy():
 # ---------------------------------------------------------------------------
 # Integration: ABMIL + MILWrapper forward
 # ---------------------------------------------------------------------------
+
 
 def test_mil_wrapper_integration_binary():
     """End-to-end: ABMIL inside MILWrapper produces a finite loss."""

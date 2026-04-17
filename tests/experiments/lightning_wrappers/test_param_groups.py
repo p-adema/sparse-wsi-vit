@@ -138,7 +138,9 @@ class TestBuildParamGroups1DWarning:
             _build_param_groups(model, default_weight_decay=0.05)
 
         bias_warnings = [w for w in caught if "patch_embed.bias" in str(w.message)]
-        assert len(bias_warnings) >= 1, "Expected warning for unflagged patch_embed.bias"
+        assert len(bias_warnings) >= 1, (
+            "Expected warning for unflagged patch_embed.bias"
+        )
 
     def test_no_warning_for_flagged_1d_param(self):
         """A 1D param with _no_weight_decay=True should NOT trigger a warning."""
@@ -148,8 +150,14 @@ class TestBuildParamGroups1DWarning:
             warnings.simplefilter("always")
             _build_param_groups(model, default_weight_decay=0.05)
 
-        flagged_warnings = [w for w in caught if "cls_token" in str(w.message) or "pos_embed" in str(w.message)]
-        assert len(flagged_warnings) == 0, "Should not warn for params with _no_weight_decay"
+        flagged_warnings = [
+            w
+            for w in caught
+            if "cls_token" in str(w.message) or "pos_embed" in str(w.message)
+        ]
+        assert len(flagged_warnings) == 0, (
+            "Should not warn for params with _no_weight_decay"
+        )
 
     def test_no_warning_when_default_wd_is_zero(self):
         """No warnings when default_weight_decay=0 (all params get WD=0)."""
@@ -172,25 +180,33 @@ class TestBuildParamGroupsLLRD:
     def test_raises_when_num_blocks_is_none(self):
         model = _FakeWrapper(num_blocks=2)
         with pytest.raises(ValueError, match="num_blocks must be set"):
-            _build_param_groups(model, default_weight_decay=0.05, layer_decay=0.75, num_blocks=None)
+            _build_param_groups(
+                model, default_weight_decay=0.05, layer_decay=0.75, num_blocks=None
+            )
 
     def test_no_error_when_both_none(self):
         model = _FakeWrapper(num_blocks=2)
         with warnings.catch_warnings(action="ignore"):
-            groups = _build_param_groups(model, default_weight_decay=0.05, layer_decay=None, num_blocks=None)
+            groups = _build_param_groups(
+                model, default_weight_decay=0.05, layer_decay=None, num_blocks=None
+            )
         assert len(groups) > 0
         assert all("lr_scale" not in g for g in groups)
 
     def test_lr_scale_present_with_llrd(self):
         model = _FakeWrapper(num_blocks=4)
         with warnings.catch_warnings(action="ignore"):
-            groups = _build_param_groups(model, default_weight_decay=0.05, layer_decay=0.75, num_blocks=4)
+            groups = _build_param_groups(
+                model, default_weight_decay=0.05, layer_decay=0.75, num_blocks=4
+            )
         assert all("lr_scale" in g for g in groups)
 
     def test_head_gets_highest_lr_scale(self):
         model = _FakeWrapper(num_blocks=4)
         with warnings.catch_warnings(action="ignore"):
-            groups = _build_param_groups(model, default_weight_decay=0.05, layer_decay=0.75, num_blocks=4)
+            groups = _build_param_groups(
+                model, default_weight_decay=0.05, layer_decay=0.75, num_blocks=4
+            )
         # Head layer index = num_blocks + 1 = 5; num_layers = 6
         # lr_scale = 0.75^(6-1-5) = 0.75^0 = 1.0
         lr_scales = [g["lr_scale"] for g in groups]
@@ -201,7 +217,12 @@ class TestBuildParamGroupsLLRD:
         decay = 0.75
         model = _FakeWrapper(num_blocks=num_blocks)
         with warnings.catch_warnings(action="ignore"):
-            groups = _build_param_groups(model, default_weight_decay=0.05, layer_decay=decay, num_blocks=num_blocks)
+            groups = _build_param_groups(
+                model,
+                default_weight_decay=0.05,
+                layer_decay=decay,
+                num_blocks=num_blocks,
+            )
 
         # Embedding layer index = 0; num_layers = 6
         # lr_scale = 0.75^(6-1-0) = 0.75^5
@@ -212,7 +233,9 @@ class TestBuildParamGroupsLLRD:
     def test_lr_scales_monotonically_increase(self):
         model = _FakeWrapper(num_blocks=4)
         with warnings.catch_warnings(action="ignore"):
-            groups = _build_param_groups(model, default_weight_decay=0.0, layer_decay=0.75, num_blocks=4)
+            groups = _build_param_groups(
+                model, default_weight_decay=0.0, layer_decay=0.75, num_blocks=4
+            )
         # With wd=0 for all params, groups differ only by lr_scale
         lr_scales = sorted(g["lr_scale"] for g in groups)
         for i in range(len(lr_scales) - 1):
@@ -221,6 +244,8 @@ class TestBuildParamGroupsLLRD:
     def test_no_lr_scale_without_llrd(self):
         model = _FakeWrapper(num_blocks=4)
         with warnings.catch_warnings(action="ignore"):
-            groups = _build_param_groups(model, default_weight_decay=0.05, layer_decay=None, num_blocks=4)
+            groups = _build_param_groups(
+                model, default_weight_decay=0.05, layer_decay=None, num_blocks=4
+            )
         for g in groups:
             assert "lr_scale" not in g

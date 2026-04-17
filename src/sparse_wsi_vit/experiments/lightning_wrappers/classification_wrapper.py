@@ -7,7 +7,9 @@ import torchmetrics
 
 import wandb
 from sparse_wsi_vit.experiments.default_cfg import ExperimentConfig
-from sparse_wsi_vit.experiments.lightning_wrappers.base_lightning_wrapper import LightningWrapperBase
+from sparse_wsi_vit.experiments.lightning_wrappers.base_lightning_wrapper import (
+    LightningWrapperBase,
+)
 
 
 class ClassificationWrapper(LightningWrapperBase):
@@ -35,7 +37,10 @@ class ClassificationWrapper(LightningWrapperBase):
 
         # Accuracy metrics — use binary task for single-output, multiclass otherwise
         if self.multiclass:
-            acc_kwargs = {"task": "multiclass", "num_classes": network.out_proj.out_features}
+            acc_kwargs = {
+                "task": "multiclass",
+                "num_classes": network.out_proj.out_features,
+            }
         else:
             acc_kwargs = {"task": "binary"}
         self.train_acc = torchmetrics.Accuracy(**acc_kwargs)
@@ -68,7 +73,9 @@ class ClassificationWrapper(LightningWrapperBase):
         """Perform a step (either training, validation or test) and calculate the loss."""
         # Validate the structure of the batch
         assert isinstance(batch, dict), "Batch must be a dictionary"
-        assert len(batch) == 3, "Batch must contain exactly 3 keys: 'input', 'label' and 'condition'"
+        assert len(batch) == 3, (
+            "Batch must contain exactly 3 keys: 'input', 'label' and 'condition'"
+        )
         assert "input" in batch, "Batch must contain 'input' key"
         assert "label" in batch, "Batch must contain 'label' key"
         assert "condition" in batch, "Batch must contain 'condition' key"
@@ -77,15 +84,19 @@ class ClassificationWrapper(LightningWrapperBase):
         labels = batch.pop("label")
 
         # Validate the structure of the batch and pass to the model
-        assert len(batch) == 2, "Batch must contain exactly 2 keys: 'input' and 'condition'"
-        output = self(input_and_condition=batch)  # Pass {input: x, condition: condition}
+        assert len(batch) == 2, (
+            "Batch must contain exactly 2 keys: 'input' and 'condition'"
+        )
+        output = self(
+            input_and_condition=batch
+        )  # Pass {input: x, condition: condition}
 
         assert isinstance(output, dict), "Output must be a dictionary"
         assert "logits" in output, "Output must contain 'logits' key"
 
         logits = output["logits"].contiguous()  # [B, T, C]
         logits = logits.reshape(-1, logits.shape[-1])  # [B * seq_len, out_channels]
-        
+
         # Handle labels based on their shape (hard indices vs soft probabilities)
         if labels.ndim > 1 and labels.shape[-1] == logits.shape[-1]:
             # Soft labels: [B, C] or [B, T, C] -> [B * T, C]
@@ -112,7 +123,7 @@ class ClassificationWrapper(LightningWrapperBase):
         loss = self.loss_metric(logits, labels)
 
         # Not adding anything here for now, but we could add things to track per epoch, etc.
-        other_outputs = {}  
+        other_outputs = {}
 
         # Return predictions and loss
         return predictions, loss, other_outputs
@@ -122,7 +133,9 @@ class ClassificationWrapper(LightningWrapperBase):
         # Perform step
         predictions, loss, other_outputs = self._step(batch, self.train_acc)
         # Log and return loss (Required in training step)
-        self.log("train/loss", loss, on_epoch=True, prog_bar=True, sync_dist=self.distributed)
+        self.log(
+            "train/loss", loss, on_epoch=True, prog_bar=True, sync_dist=self.distributed
+        )
         self.log(
             "train/acc",
             self.train_acc,
@@ -172,7 +185,9 @@ class ClassificationWrapper(LightningWrapperBase):
 
         # Log the logits histogram
         if "logits" in train_step_outputs_keys and self.logger is not None:
-            flattened_logits = torch.flatten(torch.cat([step_output["logits"] for step_output in train_step_outputs]))
+            flattened_logits = torch.flatten(
+                torch.cat([step_output["logits"] for step_output in train_step_outputs])
+            )
             self.logger.experiment.log(
                 {
                     "train/logits": wandb.Histogram(flattened_logits),
@@ -214,7 +229,9 @@ class ClassificationWrapper(LightningWrapperBase):
 
         if "logits" in validation_step_outputs_keys:
             flattened_logits = torch.flatten(
-                torch.cat([step_output["logits"] for step_output in validation_step_outputs])
+                torch.cat(
+                    [step_output["logits"] for step_output in validation_step_outputs]
+                )
             )
             if self.logger is not None:
                 self.logger.experiment.log(

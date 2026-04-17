@@ -4,7 +4,9 @@ import warnings
 
 import torch
 
-from sparse_wsi_vit.experiments.lightning_wrappers.classification_wrapper import ClassificationWrapper
+from sparse_wsi_vit.experiments.lightning_wrappers.classification_wrapper import (
+    ClassificationWrapper,
+)
 from sparse_wsi_vit.experiments.default_cfg import ExperimentConfig
 
 
@@ -27,13 +29,15 @@ def test_bce_loss():
 
     # Test 1: Initialize with use_bce_loss=True
     wrapper_bce = ClassificationWrapper(net, cfg, use_bce_loss=True)
-    assert isinstance(wrapper_bce.loss_metric, torch.nn.BCEWithLogitsLoss), \
+    assert isinstance(wrapper_bce.loss_metric, torch.nn.BCEWithLogitsLoss), (
         "Expected BCEWithLogitsLoss when use_bce_loss=True"
+    )
 
     # Test 2: Initialize with use_bce_loss=False (Default)
     wrapper_ce = ClassificationWrapper(net, cfg, use_bce_loss=False)
-    assert isinstance(wrapper_ce.loss_metric, torch.nn.CrossEntropyLoss), \
+    assert isinstance(wrapper_ce.loss_metric, torch.nn.CrossEntropyLoss), (
         "Expected CrossEntropyLoss when use_bce_loss=False"
+    )
 
 
 def test_binary_classification():
@@ -42,8 +46,9 @@ def test_binary_classification():
     net = MockNet(num_classes=1)
 
     wrapper = ClassificationWrapper(net, cfg)
-    assert isinstance(wrapper.loss_metric, torch.nn.BCEWithLogitsLoss), \
+    assert isinstance(wrapper.loss_metric, torch.nn.BCEWithLogitsLoss), (
         "Expected BCEWithLogitsLoss for binary classification"
+    )
     assert wrapper.multiclass is False
 
 
@@ -53,8 +58,9 @@ def test_multiclass_classification():
     net = MockNet(num_classes=10)
 
     wrapper = ClassificationWrapper(net, cfg)
-    assert isinstance(wrapper.loss_metric, torch.nn.CrossEntropyLoss), \
+    assert isinstance(wrapper.loss_metric, torch.nn.CrossEntropyLoss), (
         "Expected CrossEntropyLoss for multiclass classification"
+    )
     assert wrapper.multiclass is True
 
 

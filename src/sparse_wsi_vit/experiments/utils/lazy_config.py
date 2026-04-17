@@ -11,7 +11,6 @@ from typing import Any, Callable, Dict, Type, Union
 import torch
 from omegaconf import DictConfig, OmegaConf
 
-
 PLACEHOLDER = None
 
 
@@ -50,7 +49,9 @@ class LazyConfig:
             if hasattr(self.target, "__module__") and hasattr(self.target, "__name__"):
                 target_str = f"{self.target.__module__}.{self.target.__name__}"
             else:
-                raise ValueError(f"Target {self.target} is not a valid class or function")
+                raise ValueError(
+                    f"Target {self.target} is not a valid class or function"
+                )
 
         # Create config dict
         config_dict = {"__target__": target_str}
@@ -62,7 +63,9 @@ class LazyConfig:
             return OmegaConf.create(config_dict, flags={"allow_objects": True})
         except Exception as e:
             # If that fails, log the error and return plain dict as last resort
-            print(f"Warning: OmegaConf validation failed for {target_str}, using plain dict: {str(e)}")
+            print(
+                f"Warning: OmegaConf validation failed for {target_str}, using plain dict: {str(e)}"
+            )
             return config_dict
 
 
@@ -256,47 +259,69 @@ def instantiate(
         if isinstance(value, LazyConfig):
             # Nested LazyConfig objects
             if recursive_instantiate:
-                processed_args[key] = instantiate(value, recursive_instantiate=recursive_instantiate)
+                processed_args[key] = instantiate(
+                    value, recursive_instantiate=recursive_instantiate
+                )
             else:
                 # Decide whether to defer or instantiate based on target type
-                target = value.target if not isinstance(value.target, str) else _resolve_target(value.target)
+                target = (
+                    value.target
+                    if not isinstance(value.target, str)
+                    else _resolve_target(value.target)
+                )
                 if not _is_module_class(target):
                     # For non-module callables (e.g., init factories), instantiate now
-                    processed_args[key] = instantiate(value, recursive_instantiate=recursive_instantiate)
+                    processed_args[key] = instantiate(
+                        value, recursive_instantiate=recursive_instantiate
+                    )
                 else:
                     # Pass through as config (DictConfig) without constructing the module
                     processed_args[key] = value()
-        elif (isinstance(value, dict) or isinstance(value, DictConfig)) and "__target__" in value:
+        elif (
+            isinstance(value, dict) or isinstance(value, DictConfig)
+        ) and "__target__" in value:
             # If the nested config contains placeholders, don't instantiate it yet
             if _contains_placeholder(value):
                 # Keep as OmegaConf to maintain dot notation access
                 if not isinstance(value, DictConfig):
-                    processed_args[key] = OmegaConf.create(value, flags={"allow_objects": True})
+                    processed_args[key] = OmegaConf.create(
+                        value, flags={"allow_objects": True}
+                    )
                 else:
                     processed_args[key] = value
             else:
                 # If no placeholders, instantiate based on target type and recursion flag
                 target = _resolve_target(value.get("__target__"))
                 if recursive_instantiate or not _is_module_class(target):
-                    processed_args[key] = instantiate(value, recursive_instantiate=recursive_instantiate)
+                    processed_args[key] = instantiate(
+                        value, recursive_instantiate=recursive_instantiate
+                    )
                 else:
                     # Leave as config (DictConfig), do not instantiate into a module
                     if not isinstance(value, DictConfig):
-                        processed_args[key] = OmegaConf.create(value, flags={"allow_objects": True})
+                        processed_args[key] = OmegaConf.create(
+                            value, flags={"allow_objects": True}
+                        )
                     else:
                         processed_args[key] = value
         elif isinstance(value, dict) or isinstance(value, DictConfig):
             # For nested dicts without __target__, maintain dot notation access but don't instantiate
             # if they contain placeholders
             if _contains_placeholder(value):
-                processed_args[key] = OmegaConf.create(value, flags={"allow_objects": True})
+                processed_args[key] = OmegaConf.create(
+                    value, flags={"allow_objects": True}
+                )
             else:
                 if recursive_instantiate:
-                    processed_args[key] = instantiate(value, recursive_instantiate=recursive_instantiate)
+                    processed_args[key] = instantiate(
+                        value, recursive_instantiate=recursive_instantiate
+                    )
                 else:
                     # Keep as config container for later resolution/instantiation
                     if not isinstance(value, DictConfig):
-                        processed_args[key] = OmegaConf.create(value, flags={"allow_objects": True})
+                        processed_args[key] = OmegaConf.create(
+                            value, flags={"allow_objects": True}
+                        )
                     else:
                         processed_args[key] = value
         elif isinstance(value, list):
@@ -306,7 +331,8 @@ def instantiate(
                 processed_args[key] = [
                     (
                         instantiate(item, recursive_instantiate=recursive_instantiate)
-                        if isinstance(item, (dict, DictConfig, LazyConfig)) and not _contains_placeholder(item)
+                        if isinstance(item, (dict, DictConfig, LazyConfig))
+                        and not _contains_placeholder(item)
                         else item
                     )
                     for item in value
@@ -317,9 +343,13 @@ def instantiate(
                 for item in value:
                     if isinstance(item, LazyConfig):
                         new_list.append(item())
-                    elif (isinstance(item, dict) or isinstance(item, DictConfig)) and "__target__" in item:
+                    elif (
+                        isinstance(item, dict) or isinstance(item, DictConfig)
+                    ) and "__target__" in item:
                         if not isinstance(item, DictConfig):
-                            new_list.append(OmegaConf.create(item, flags={"allow_objects": True}))
+                            new_list.append(
+                                OmegaConf.create(item, flags={"allow_objects": True})
+                            )
                         else:
                             new_list.append(item)
                     else:
@@ -381,7 +411,9 @@ def to_config(obj: Any) -> Dict[str, Any]:
         if hasattr(obj, param):
             value = getattr(obj, param)
             # Recursively convert nested objects
-            if hasattr(value, "__class__") and not isinstance(value, (int, float, str, bool, list, tuple, dict)):
+            if hasattr(value, "__class__") and not isinstance(
+                value, (int, float, str, bool, list, tuple, dict)
+            ):
                 config[param] = to_config(value)
             else:
                 config[param] = value
