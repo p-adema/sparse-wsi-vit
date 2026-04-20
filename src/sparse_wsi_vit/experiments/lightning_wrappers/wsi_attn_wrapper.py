@@ -1,3 +1,5 @@
+import gc
+
 import torch
 import torchmetrics
 
@@ -142,6 +144,8 @@ class WSIAttnWrapper(LightningWrapperBase):
         Returns:
             Scalar validation loss.
         """
+        gc.collect()  # Severe fragmentation issues last run (10GB unusable)
+        torch.cuda.empty_cache()  # maybe this helps?
         loss, _, _ = self._step(batch, self.val_acc)
         self.log(
             "val/loss",
