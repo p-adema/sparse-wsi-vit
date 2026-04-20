@@ -27,7 +27,8 @@ FEATURES_DIR = "../tcga-emb"
 
 # ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1  # Standard for MIL bags
-NUM_WORKERS = 4
+NUM_WORKERS = 1  # Better for HDD or other slow disk
+WORKER_PREFETCH = 10
 CLASS_WEIGHTS = True  # this TCGA dataset has more cancer than healthy
 IN_FEATURES = 1280
 OUT_FEATURES = 1  # Binary tasks
@@ -38,6 +39,7 @@ WARMUP_ITERATIONS_PERCENTAGE = 0.05
 LEARNING_RATE = 2e-4
 WEIGHT_DECAY = 1e-4
 GRAD_CLIP = 1.0
+ACCUMULATE_GRAD_STEPS = 10
 
 
 def get_config() -> ExperimentConfig:
@@ -54,6 +56,7 @@ def get_config() -> ExperimentConfig:
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
         class_weights=CLASS_WEIGHTS,
+        worker_prefetch=WORKER_PREFETCH,
     )
 
     # Network: The very sketchy ViT-5/Small network
@@ -80,6 +83,7 @@ def get_config() -> ExperimentConfig:
         iterations=TRAINING_ITERATIONS,
         grad_clip=GRAD_CLIP,
         precision=PRECISION,
+        accumulate_grad_steps=ACCUMULATE_GRAD_STEPS
     )
 
     # Scheduler

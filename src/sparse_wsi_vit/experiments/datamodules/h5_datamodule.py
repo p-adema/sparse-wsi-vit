@@ -65,6 +65,7 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
             batch_size: int = 1,
             num_workers: int = 4,
             class_weights: bool = False,
+            worker_prefetch: int | None = None
     ):
         super().__init__()
         self.train_csv = train_csv
@@ -76,6 +77,7 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         self.input_channels = 1280
         self.output_channels = 1
         self.class_weights = class_weights
+        self.worker_prefetch = worker_prefetch
 
     def setup(self, stage: str | None = None) -> None:
         """Instantiate train and validation datasets.
@@ -105,6 +107,7 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
             num_workers=self.num_workers,
             collate_fn=mil_collate_fn,
             pin_memory=True,
+            prefetch_factor=self.worker_prefetch
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -116,4 +119,5 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
             num_workers=self.num_workers,
             collate_fn=mil_collate_fn,
             pin_memory=True,
+            prefetch_factor=self.worker_prefetch
         )
