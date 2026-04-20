@@ -139,7 +139,11 @@ def main(slides: pathlib.Path, masks: pathlib.Path, output: pathlib.Path, check:
     save_handle = threading.Thread()
     save_handle.start()
     for slide_path, mask_path in tqdm.tqdm(unprocessed_paths, desc="processing slides"):
-        features, coords = process_slide(slide_path, mask_path)
+        try:
+            features, coords = process_slide(slide_path, mask_path)
+        except (Exception, KeyboardInterrupt) as e:
+            e.add_note(f"Failed on {slide_path = }")
+            raise
 
         out_path = (output / slide_path.name).with_suffix(".h5")
         # The hard drive I'm using for this is slow, so I put this on a separate thread.
