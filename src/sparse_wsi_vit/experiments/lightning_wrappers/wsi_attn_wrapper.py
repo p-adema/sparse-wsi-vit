@@ -11,11 +11,11 @@ class WSIAttnWrapper(LightningWrapperBase):
     """Lightning wrapper for global attention on WSIs, cropping into training images."""
 
     def __init__(
-        self,
-        network: torch.nn.Module,
-        cfg: ExperimentConfig,
-        use_bce_loss: bool = True,
-        training_crop_tokens: int | None = None,
+            self,
+            network: torch.nn.Module,
+            cfg: ExperimentConfig,
+            use_bce_loss: bool = True,
+            training_crop_tokens: int | None = None,
     ):
         """Initialize the WSIAttnWrapper.
 
@@ -48,9 +48,9 @@ class WSIAttnWrapper(LightningWrapperBase):
             self.loss_metric = torch.nn.BCEWithLogitsLoss()
 
     def _step(
-        self,
-        batch: dict[str, torch.Tensor],
-        accuracy_calculator: torchmetrics.Metric,
+            self,
+            batch: dict[str, torch.Tensor],
+            accuracy_calculator: torchmetrics.Metric,
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
         """Shared forward + loss computation for train and validation.
 
@@ -74,12 +74,14 @@ class WSIAttnWrapper(LightningWrapperBase):
         else:
             loss = self.loss_metric(logits, labels)
             preds = torch.argmax(logits, dim=-1)
+        if "class_weight" in batch:
+            loss *= batch["class_weight"]
 
         accuracy_calculator.update(preds, labels)
         return loss, preds, {"logits": logits}
 
     def training_step(
-        self, batch: dict[str, torch.Tensor], batch_idx: int
+            self, batch: dict[str, torch.Tensor], batch_idx: int
     ) -> torch.Tensor:
         """Perform one training step and log loss.
 
@@ -92,8 +94,8 @@ class WSIAttnWrapper(LightningWrapperBase):
         """
         n_tokens = batch["coords"].size(-2)
         if (
-            self.training_crop_tokens is not None
-            and n_tokens > self.training_crop_tokens
+                self.training_crop_tokens is not None
+                and n_tokens > self.training_crop_tokens
         ):
             centre = torch.randint(0, n_tokens, (1,), device="cuda")
             diffs = batch["coords"] - batch["coords"][..., centre, :]
@@ -129,7 +131,7 @@ class WSIAttnWrapper(LightningWrapperBase):
         self.train_acc.reset()
 
     def validation_step(
-        self, batch: dict[str, torch.Tensor], batch_idx: int
+            self, batch: dict[str, torch.Tensor], batch_idx: int
     ) -> torch.Tensor:
         """Perform one validation step and log loss.
 

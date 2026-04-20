@@ -1,7 +1,7 @@
-"""ViT-5 classification config for debugging, training on test data from AMC.
+"""ViT-5 classification config for debugging, training on first split from TCGA-like embeddings
 
 Usage:
-    uv run experiments/run.py --config src/sparse_wsi_vit/configs/baseline_vit5dense_preembed.py
+    uv run experiments/run.py --config src/sparse_wsi_vit/configs/baseline_vit5dense_preembed_tcga.py
 """
 
 import torch
@@ -22,12 +22,13 @@ from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import (
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 
 # ─── Data Details ──────────────────────────────────────────────
-CSV_BASE = "../amc-data"
-FEATURES_DIR = "../amc-data"
+CSV_BASE = "../splits/tcga-emb/0"
+FEATURES_DIR = "../tcga-emb"
 
 # ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1  # Standard for MIL bags
 NUM_WORKERS = 4
+CLASS_WEIGHTS = True  # this TCGA dataset has more cancer than healthy
 IN_FEATURES = 1280
 OUT_FEATURES = 1  # Binary tasks
 PRECISION = "bf16-mixed"
@@ -45,15 +46,14 @@ def get_config() -> ExperimentConfig:
     config.seed = 42
 
     # Dataset: Connects to your H5 extraction
-    config.dataset = LazyConfig(
-        H5FeatureBagDataModule
-    )(
-        train_csv=f"{CSV_BASE}/combined_tcga_amc.csv",
-        val_csv=f"{CSV_BASE}/combined_tcga_amc.csv",  # TODO: Replace with actual val split!
+    config.dataset = LazyConfig(H5FeatureBagDataModule)(
+        train_csv=f"{CSV_BASE}/train.csv",
+        val_csv=f"{CSV_BASE}/val.csv",
         features_dir=FEATURES_DIR,
-        label_col_name="tmb_binary",  # Changed from 'label' to an actual column present in the CSV
+        label_col_name="label",
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
+        class_weights=CLASS_WEIGHTS,
     )
 
     # Network: The very sketchy ViT-5/Small network

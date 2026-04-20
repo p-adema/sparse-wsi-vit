@@ -12,7 +12,14 @@ class H5FeatureBagDataset(Dataset):
     Intended for MIL (Multiple Instance Learning) classification.
     """
 
-    def __init__(self, csv_path, features_dir, label_col_name="label", transform=None):
+    def __init__(
+            self,
+            csv_path,
+            features_dir,
+            label_col_name="label",
+            transform=None,
+            class_weights=False,
+    ):
         """
         Args:
             csv_path (str): Path to CSV containing 'slidename' and label.
@@ -24,12 +31,14 @@ class H5FeatureBagDataset(Dataset):
         self.features_dir = Path(features_dir)
         self.transform = transform
         self.label_col_name = label_col_name
+        self.class_weights = class_weights
 
         # Load slide-level metadata
         df = pd.read_csv(csv_path)
 
         # Mapping for string to int labels
         self.label_map = {}
+        label_counts = {}
 
         # Keep only slides for which the feature .h5 file actually exist
         valid_slides = []
@@ -47,6 +56,8 @@ class H5FeatureBagDataset(Dataset):
                 else:
                     mapped_label = int(raw_label)
 
+                label_counts[mapped_label] = label_counts.get(mapped_label, 0) + 1
+
                 valid_slides.append(
                     {
                         "slide_name": slide_name,
@@ -54,9 +65,15 @@ class H5FeatureBagDataset(Dataset):
                         "h5_path": h5_path,
                     }
                 )
+        per_cls = len(valid_slides) / len(label_counts)  # N / |C|
+        if self.class_weights:
+            for slide in valid_slides:
+                # The average class weight with this formulation is still 1.0
+                slide["class_weight"] = per_cls / label_counts[slide["label"]]
 
         self.slides = valid_slides
         print(f"Loaded {len(self.slides)} valid WSI feature bags from {features_dir}")
+        assert len(self.slides) > 0, "Probably misconfigured dataset!"
 
     def __len__(self) -> int:
         """Return the number of valid slides in the dataset."""
@@ -91,9 +108,12 @@ class H5FeatureBagDataset(Dataset):
             features_t = self.transform(features_t)
 
         # Note: MIL models generally expect shape (N, feature_dim).
-        return {
+        res = {
             "input": features_t,
             "label": torch.tensor(label, dtype=torch.long),
             "slide_name": item["slide_name"],
             "coords": coords_t,
         }
+        if self.class_weights:
+            res["class_weight"] = item["class_weight"]
+        return res
