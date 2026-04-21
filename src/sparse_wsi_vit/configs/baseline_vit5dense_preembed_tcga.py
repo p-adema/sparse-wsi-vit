@@ -22,7 +22,7 @@ from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import (
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 
 # ─── Data Details ──────────────────────────────────────────────
-CSV_BASE = "../splits/tcga-emb/0"
+CSV_BASE = "../splits/tcga-emb-atleast16k/0"
 FEATURES_DIR = "../tcga-emb"
 
 # ─── Hyperparameters ─────────────────────────────────────────────
@@ -68,7 +68,10 @@ def get_config() -> ExperimentConfig:
     # Lightning wrapper mappings
     config.lightning_wrapper_class = LazyConfig(WSIAttnWrapper)(
         use_bce_loss=(OUT_FEATURES == 1),
-        training_crop_tokens=2 ** 13 - 5,  # 8187 (+ CLS + 4REG = 2**13),
+        training_crop_tokens=2 ** 14 - 5,  # 16 379 (+ CLS + 4REG = 2**13),
+        eval_crop_tokens=2 ** 16 - 5,  # 65 531
+        compile_train="max-autotune-no-cudagraphs",
+        compile_eval="max-autotune-no-cudagraphs",
     )
 
     # Optimizer

@@ -2,6 +2,7 @@ import gc
 
 import torch
 import torchmetrics
+from torch import Tensor
 
 from sparse_wsi_vit.experiments.default_cfg import ExperimentConfig
 from sparse_wsi_vit.experiments.lightning_wrappers.base_lightning_wrapper import (
@@ -18,6 +19,9 @@ class WSIAttnWrapper(LightningWrapperBase):
             cfg: ExperimentConfig,
             use_bce_loss: bool = True,
             training_crop_tokens: int | None = None,
+            eval_crop_tokens: int | None = None,
+            compile_train: str | None = None,
+            compile_eval: str | None = None,
     ):
         """Initialize the WSIAttnWrapper.
 
@@ -44,15 +48,25 @@ class WSIAttnWrapper(LightningWrapperBase):
 
         self.use_bce_loss = use_bce_loss
         self.training_crop_tokens = training_crop_tokens
+        self.eval_crop_tokens = eval_crop_tokens
         if self.multiclass and not self.use_bce_loss:
             self.loss_metric = torch.nn.CrossEntropyLoss()
         else:
             self.loss_metric = torch.nn.BCEWithLogitsLoss()
+        if compile_train:
+            self.train_model = torch.compile(self.network, mode=compile_train)
+        else:
+            self.train_model = self.network
+        if compile_eval:
+            self.eval_model = torch.compile(self.network, mode=compile_eval)
+        else:
+            self.eval_model = self.network
 
     def _step(
             self,
             batch: dict[str, torch.Tensor],
             accuracy_calculator: torchmetrics.Metric,
+            net: torch.nn.Module | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
         """Shared forward + loss computation for train and validation.
 
@@ -67,7 +81,11 @@ class WSIAttnWrapper(LightningWrapperBase):
         coords = batch["coords"]
         labels = batch["label"]
 
-        output_dict = self.network(inputs, coords)
+        if net is None:
+            output_dict = self.network(inputs, coords)
+        else:
+            output_dict = net(inputs, coords)
+
         logits = output_dict["logits"].squeeze(1)
 
         if not self.multiclass and self.use_bce_loss:
@@ -94,28 +112,8 @@ class WSIAttnWrapper(LightningWrapperBase):
         Returns:
             Scalar training loss.
         """
-        n_tokens = batch["coords"].size(-2)
-        if (
-                self.training_crop_tokens is not None
-                and n_tokens > self.training_crop_tokens
-        ):
-            centre = torch.randint(0, n_tokens, (1,), device="cuda")
-            diffs = batch["coords"] - batch["coords"][..., centre, :]
-            distances = torch.linalg.norm(diffs, dim=-1)
-            closest = torch.topk(
-                distances,
-                self.training_crop_tokens,
-                dim=-1,
-                largest=False,
-                sorted=False,
-            ).indices.squeeze()
-            assert closest.shape == (self.training_crop_tokens,), (
-                f"Strange {closest.shape=}, maybe batched?"
-            )
-            batch["coords"] = batch["coords"][:, closest]
-            batch["input"] = batch["input"][:, closest]
-
-        loss, _, _ = self._step(batch, self.train_acc)
+        self._maybe_crop_batch(batch, self.training_crop_tokens)
+        loss, _, _ = self._step(batch, self.train_acc, net=self.train_model)
         self.log(
             "train/loss",
             loss,
@@ -125,6 +123,25 @@ class WSIAttnWrapper(LightningWrapperBase):
             batch_size=batch["input"].size(0),
         )
         return loss
+
+    def _maybe_crop_batch(self, batch: dict[str, Tensor], crop_tokens: int | None):
+        n_tokens = batch["coords"].size(-2)
+        if crop_tokens is not None and n_tokens > crop_tokens:
+            centre = torch.randint(0, n_tokens, (1,), device="cuda")
+            diffs = batch["coords"] - batch["coords"][..., centre, :]
+            distances = torch.linalg.norm(diffs, dim=-1)
+            closest = torch.topk(
+                distances,
+                crop_tokens,
+                dim=-1,
+                largest=False,
+                sorted=False,
+            ).indices.squeeze()
+            assert closest.shape == (crop_tokens,), (
+                f"Strange {closest.shape=}, maybe batched?"
+            )
+            batch["coords"] = batch["coords"][:, closest]
+            batch["input"] = batch["input"][:, closest]
 
     def on_train_epoch_end(self) -> None:
         """Log epoch-level training accuracy and reset the accumulator."""
@@ -144,9 +161,13 @@ class WSIAttnWrapper(LightningWrapperBase):
         Returns:
             Scalar validation loss.
         """
-        gc.collect()  # Severe fragmentation issues last run (10GB unusable)
-        torch.cuda.empty_cache()  # maybe this helps?
-        loss, _, _ = self._step(batch, self.val_acc)
+        gc.collect()
+        torch.cuda.empty_cache()
+        self._maybe_crop_batch(batch, self.eval_crop_tokens)
+        torch._dynamo.mark_dynamic(batch["input"], 1)
+        torch._dynamo.mark_dynamic(batch["coords"], 1)
+        with torch.inference_mode():
+            loss, _, _ = self._step(batch, self.val_acc, net=self.eval_model)
         self.log(
             "val/loss",
             loss,
