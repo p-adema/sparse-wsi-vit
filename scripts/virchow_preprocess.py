@@ -133,7 +133,7 @@ def main(slides: pathlib.Path, masks: pathlib.Path, output: pathlib.Path, check:
             total_size += estimate_size(slide_path, mask_path)
 
         print("All files seem OK.")
-        print(f"Total estimated output: {total_out:.1f} GB")
+        print(f"Total estimated output: {total_size:.1f} GB")
         return
 
     save_handle = threading.Thread()
