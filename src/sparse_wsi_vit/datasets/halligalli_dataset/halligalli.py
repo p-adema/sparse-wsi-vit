@@ -48,10 +48,18 @@ import numpy as np
 ALL_SHAPES = ["circle", "triangle", "square", "cross", "star"]
 
 BASE_COLORS = [
-    [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0],
-    [0.0, 1.0, 1.0], [1.0, 0.5, 0.0], [1.0, 1.0, 0.0],
-    [1.0, 0.0, 1.0], [0.5, 0.5, 0.5], [0.8, 0.2, 0.4],
-    [0.2, 0.6, 0.8], [0.9, 0.9, 0.9], [0.3, 0.3, 0.0],
+    [1.0, 0.0, 0.0],
+    [0.0, 0.0, 1.0],
+    [0.0, 1.0, 0.0],
+    [0.0, 1.0, 1.0],
+    [1.0, 0.5, 0.0],
+    [1.0, 1.0, 0.0],
+    [1.0, 0.0, 1.0],
+    [0.5, 0.5, 0.5],
+    [0.8, 0.2, 0.4],
+    [0.2, 0.6, 0.8],
+    [0.9, 0.9, 0.9],
+    [0.3, 0.3, 0.0],
 ]
 
 
@@ -59,11 +67,13 @@ def _random_color():
     base = np.array(random.choice(BASE_COLORS))
     return np.clip(
         base * np.random.uniform(0.5, 1.3) + np.random.uniform(-0.15, 0.15, 3),
-        0, 1,
+        0,
+        1,
     )
 
 
 # ── shape rasteriser with rotation + deformation ──────────────────────
+
 
 def _shape_mask(shape, r, angle_rad, deform_strength=0.0):
     """Return a boolean mask for *shape* in a local (2r+1)² patch.
@@ -72,7 +82,7 @@ def _shape_mask(shape, r, angle_rad, deform_strength=0.0):
     optionally deformed with a smooth displacement field.
     """
     size = 2 * r + 1
-    yy, xx = np.mgrid[-r:r + 1, -r:r + 1].astype(np.float64)
+    yy, xx = np.mgrid[-r : r + 1, -r : r + 1].astype(np.float64)
 
     # inverse-rotate coordinates
     c, s = np.cos(angle_rad), np.sin(angle_rad)
@@ -98,7 +108,7 @@ def _shape_mask(shape, r, angle_rad, deform_strength=0.0):
 
     # test membership in the un-rotated canonical shape
     if shape == "circle":
-        mask = (yr ** 2 + xr ** 2) <= r ** 2
+        mask = (yr**2 + xr**2) <= r**2
 
     elif shape == "square":
         mask = (np.abs(yr) <= r * 0.85) & (np.abs(xr) <= r * 0.85)
@@ -112,11 +122,12 @@ def _shape_mask(shape, r, angle_rad, deform_strength=0.0):
 
     elif shape == "cross":
         w = max(1, r * 0.3)
-        mask = ((np.abs(yr) <= w) & (np.abs(xr) <= r * 0.9)) | \
-               ((np.abs(xr) <= w) & (np.abs(yr) <= r * 0.9))
+        mask = ((np.abs(yr) <= w) & (np.abs(xr) <= r * 0.9)) | (
+            (np.abs(xr) <= w) & (np.abs(yr) <= r * 0.9)
+        )
 
     elif shape == "star":
-        dist = np.sqrt(yr ** 2 + xr ** 2)
+        dist = np.sqrt(yr**2 + xr**2)
         angle = np.arctan2(yr, xr)
         inner = 0.4 * r
         outer = inner + (r - inner) * (np.cos(5 * angle) + 1) / 2
@@ -128,8 +139,9 @@ def _shape_mask(shape, r, angle_rad, deform_strength=0.0):
     return mask
 
 
-def _stamp_shape(canvas, shape, cy, cx, r, angle_rad=0.0,
-                 deform_strength=0.0, color=None):
+def _stamp_shape(
+    canvas, shape, cy, cx, r, angle_rad=0.0, deform_strength=0.0, color=None
+):
     """Draw a rotated+deformed shape onto *canvas* (H, W, 3)."""
     H, W = canvas.shape[:2]
     mask = _shape_mask(shape, r, angle_rad, deform_strength)
@@ -163,16 +175,16 @@ def _stamp_shape(canvas, shape, cy, cx, r, angle_rad=0.0,
 
 # ── clutter generators ────────────────────────────────────────────────
 
-def _draw_clutter(canvas, density, min_r=2, max_r_frac=0.015,
-                  exclude_positions=None, exclude_radius=0):
+
+def _draw_clutter(
+    canvas, density, min_r=2, max_r_frac=0.015, exclude_positions=None, exclude_radius=0
+):
     """Scatter dense visual clutter across the canvas.
 
     *density* is the average number of elements per 256×256 region.
     Elements: small blobs, short lines, tiny rectangles.
-
-    If *exclude_positions* is provided, clutter elements whose centre
-    falls within *exclude_radius* of any listed position are rejected
-    (re-sampled up to a fixed number of tries).
+    Clutter whose centre falls within *exclude_radius* of any position
+    in *exclude_positions* is rejected and resampled.
     """
     H, W = canvas.shape[:2]
     area = H * W
@@ -184,17 +196,13 @@ def _draw_clutter(canvas, density, min_r=2, max_r_frac=0.015,
     placed = 0
     attempts = 0
     max_attempts = n_elements * 20  # safety cap
-    # lines grow up to 3*max_r away from their centre, so expand the
-    # exclusion zone to cover the worst-case element extent
-    eff_exclude = exclude_radius + 3 * max_r if exclude_positions else 0
     while placed < n_elements and attempts < max_attempts:
         attempts += 1
         cy = np.random.randint(0, H)
         cx = np.random.randint(0, W)
 
-        # reject if too close to a key position
         if exclude_positions and any(
-            abs(cy - ky) < eff_exclude and abs(cx - kx) < eff_exclude
+            abs(cy - ky) < exclude_radius and abs(cx - kx) < exclude_radius
             for ky, kx in exclude_positions
         ):
             continue
@@ -208,7 +216,7 @@ def _draw_clutter(canvas, density, min_r=2, max_r_frac=0.015,
             y0, y1 = max(0, cy - r), min(H, cy + r)
             x0, x1 = max(0, cx - r), min(W, cx + r)
             yy, xx = np.ogrid[y0:y1, x0:x1]
-            blob = ((yy - cy) ** 2 + (xx - cx) ** 2) <= r ** 2
+            blob = ((yy - cy) ** 2 + (xx - cx) ** 2) <= r**2
             canvas[y0:y1, x0:x1][blob] = color
 
         elif kind == 1:
@@ -242,7 +250,7 @@ def _draw_confounders(canvas, positions, r, n_per_key=2):
     for capacity in the region embedding.
     """
     H, W = canvas.shape[:2]
-    for (ky, kx) in positions:
+    for ky, kx in positions:
         for _ in range(n_per_key):
             shape = random.choice(ALL_SHAPES)
             angle = np.random.uniform(0, 2 * np.pi)
@@ -253,11 +261,19 @@ def _draw_confounders(canvas, positions, r, n_per_key=2):
             frag_x = kx + offset_x
             # use a smaller or similar radius
             frag_r = max(2, int(r * np.random.uniform(0.5, 1.2)))
-            _stamp_shape(canvas, shape, frag_y, frag_x, frag_r,
-                         angle_rad=angle, deform_strength=0.3)
+            _stamp_shape(
+                canvas,
+                shape,
+                frag_y,
+                frag_x,
+                frag_r,
+                angle_rad=angle,
+                deform_strength=0.3,
+            )
 
 
 # ── core generator ────────────────────────────────────────────────────
+
 
 class HalliGalliGenerator:
     """Synthetic long-range global classification benchmark.
@@ -307,8 +323,11 @@ class HalliGalliGenerator:
         image = np.zeros((H, W, 3), dtype=np.float32)
 
         # base radius: tiny relative to image
-        r_base = shape_radius if shape_radius is not None \
+        r_base = (
+            shape_radius
+            if shape_radius is not None
             else max(3, int(image_size * 0.008))
+        )
 
         # compute key positions up-front so clutter can avoid them
         positions = HalliGalliGenerator._key_positions(H, W, separation)
@@ -316,7 +335,8 @@ class HalliGalliGenerator:
         # ── background clutter (drawn first, behind everything) ───
         if clutter_density > 0:
             _draw_clutter(
-                image, clutter_density,
+                image,
+                clutter_density,
                 exclude_positions=positions,
                 exclude_radius=3 * r_base,
             )
@@ -326,17 +346,23 @@ class HalliGalliGenerator:
 
         for (cy, cx), shape_name in zip(positions, corner_shapes):
             # per-shape variation
-            r = max(2, int(r_base * np.random.uniform(
-                1 - scale_jitter, 1 + scale_jitter)))
+            r = max(
+                2, int(r_base * np.random.uniform(1 - scale_jitter, 1 + scale_jitter))
+            )
             angle = np.random.uniform(0, 2 * np.pi)
-            _stamp_shape(image, shape_name, cy, cx, r,
-                         angle_rad=angle,
-                         deform_strength=key_deform_strength)
+            _stamp_shape(
+                image,
+                shape_name,
+                cy,
+                cx,
+                r,
+                angle_rad=angle,
+                deform_strength=key_deform_strength,
+            )
 
         # ── partial-shape confounders near key regions ────────────
         if confounders_per_key > 0:
-            _draw_confounders(image, positions, r_base,
-                              n_per_key=confounders_per_key)
+            _draw_confounders(image, positions, r_base, n_per_key=confounders_per_key)
 
         # ── full distractor shapes (away from keys) ──────────────
         if num_distractors > 0:
@@ -345,18 +371,28 @@ class HalliGalliGenerator:
                     dy = np.random.randint(r_base + 1, H - r_base - 1)
                     dx = np.random.randint(r_base + 1, W - r_base - 1)
                     too_close = any(
-                        abs(dy - ky) < 4 * r_base and
-                        abs(dx - kx) < 4 * r_base
+                        abs(dy - ky) < 4 * r_base and abs(dx - kx) < 4 * r_base
                         for ky, kx in positions
                     )
                     if not too_close:
                         shape = random.choice(ALL_SHAPES)
-                        r = max(2, int(r_base * np.random.uniform(
-                            1 - scale_jitter, 1 + scale_jitter)))
+                        r = max(
+                            2,
+                            int(
+                                r_base
+                                * np.random.uniform(1 - scale_jitter, 1 + scale_jitter)
+                            ),
+                        )
                         angle = np.random.uniform(0, 2 * np.pi)
-                        _stamp_shape(image, shape, dy, dx, r,
-                                     angle_rad=angle,
-                                     deform_strength=deform_strength)
+                        _stamp_shape(
+                            image,
+                            shape,
+                            dy,
+                            dx,
+                            r,
+                            angle_rad=angle,
+                            deform_strength=deform_strength,
+                        )
                         break
 
         # ── label ─────────────────────────────────────────────────
@@ -366,15 +402,14 @@ class HalliGalliGenerator:
 
         # ── per-pixel noise ───────────────────────────────────────
         if noise_sigma > 0:
-            image += noise_sigma * np.random.randn(H, W, 3).astype(
-                np.float32)
+            image += noise_sigma * np.random.randn(H, W, 3).astype(np.float32)
         image = np.clip(image, 0.0, 1.0)
 
         return image, label, corner_shapes, positions
 
 
-
 # ── visualisation ─────────────────────────────────────────────────────
+
 
 def _show_samples(n=8, highlight=True, **kwargs):
     """Render a row of samples with optional highlight circles on key shapes.
@@ -396,9 +431,7 @@ def _show_samples(n=8, highlight=True, **kwargs):
         axes = axes[:, None]
 
     for j in range(n):
-        img, lbl, shapes, positions = HalliGalliGenerator.generate_single(
-            **kwargs
-        )
+        img, lbl, shapes, positions = HalliGalliGenerator.generate_single(**kwargs)
         axes[0, j].imshow(img)
         axes[0, j].set_title(f"label={lbl}", fontsize=9)
         axes[0, j].axis("off")
@@ -406,12 +439,12 @@ def _show_samples(n=8, highlight=True, **kwargs):
         if highlight:
             # determine which corners form the matching pair
             counts = Counter(shapes)
-            pair_shape = next(
-                (s for s, k in counts.items() if k == 2), None
+            pair_shape = next((s for s, k in counts.items() if k == 2), None)
+            pair_idx = (
+                {i for i, s in enumerate(shapes) if s == pair_shape}
+                if pair_shape and lbl == 1
+                else set()
             )
-            pair_idx = {
-                i for i, s in enumerate(shapes) if s == pair_shape
-            } if pair_shape and lbl == 1 else set()
 
             # radius of the highlight circle, scaled to image size
             H = img.shape[0]
@@ -420,18 +453,26 @@ def _show_samples(n=8, highlight=True, **kwargs):
 
             for i, (cy, cx) in enumerate(positions):
                 color = "lime" if i in pair_idx else "yellow"
-                axes[0, j].add_patch(Circle(
-                    (cx, cy), hi_r, fill=False,
-                    edgecolor=color, linewidth=1.8,
-                ))
+                axes[0, j].add_patch(
+                    Circle(
+                        (cx, cy),
+                        hi_r,
+                        fill=False,
+                        edgecolor=color,
+                        linewidth=1.8,
+                    )
+                )
 
         txt_lines = [
             f"{i}: {s}{' *' if lbl == 1 and s == pair_shape else ''}"
             for i, s in enumerate(shapes)
         ]
         axes[1, j].text(
-            0.05, 0.5, "\n".join(txt_lines),
-            fontsize=8, family="monospace",
+            0.05,
+            0.5,
+            "\n".join(txt_lines),
+            fontsize=8,
+            family="monospace",
             verticalalignment="center",
             transform=axes[1, j].transAxes,
         )
@@ -446,12 +487,13 @@ def _show_samples(n=8, highlight=True, **kwargs):
     fig.suptitle(
         f"HalliGalli  (size={sz}, r={r_eff}, sep={sep}, "
         f"distractors={nd}, clutter={cd})",
-        fontsize=11, y=1.01,
+        fontsize=11,
+        y=1.01,
     )
     fig.tight_layout()
-    plt.savefig("halligalli_samples.png", dpi=150, bbox_inches="tight")
+    plt.savefig("halligalli_samples.pdf", dpi=600, bbox_inches="tight")
     plt.show()
-    print("Saved halligalli_samples.png")
+    print("Saved halligalli_samples.pdf")
 
 
 if __name__ == "__main__":
@@ -468,16 +510,29 @@ if __name__ == "__main__":
     parser.add_argument("--scale_jitter", type=float, default=0.3)
     parser.add_argument("--deform_strength", type=float, default=0.25)
     parser.add_argument("--key_deform_strength", type=float, default=0.0)
-    parser.add_argument("--visualize", action="store_true",
-                        help="Plot and save sample images to halligalli_samples.png")
-    parser.add_argument("--n_samples", type=int, default=8,
-                        help="Number of samples to visualize (--visualize only)")
-    parser.add_argument("--no_highlight", action="store_true",
-                        help="Disable highlight circles on key shapes (--visualize only)")
+    parser.add_argument(
+        "--visualize",
+        action="store_true",
+        help="Plot and save sample images to halligalli_samples.png",
+    )
+    parser.add_argument(
+        "--n_samples",
+        type=int,
+        default=8,
+        help="Number of samples to visualize (--visualize only)",
+    )
+    parser.add_argument(
+        "--no_highlight",
+        action="store_true",
+        help="Disable highlight circles on key shapes (--visualize only)",
+    )
     args = parser.parse_args()
 
-    kw = {k: v for k, v in vars(args).items()
-          if k not in ("visualize", "n_samples", "no_highlight")}
+    kw = {
+        k: v
+        for k, v in vars(args).items()
+        if k not in ("visualize", "n_samples", "no_highlight")
+    }
 
     if args.visualize:
         _show_samples(n=args.n_samples, highlight=not args.no_highlight, **kw)
