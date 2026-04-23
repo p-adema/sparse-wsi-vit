@@ -36,6 +36,7 @@ class HalliGalliDataset(Dataset):
     def __getitem__(self, idx: int) -> dict:
         img, label, _, _ = HalliGalliGenerator.generate_single(
             image_size=self.image_size,
+            target_label=idx % 2,
             **self.kwargs,
         )
         # img: (H, W, 3) ndarray → Tensor (3, H, W)

@@ -309,6 +309,7 @@ class HalliGalliGenerator:
         scale_jitter=0.3,
         deform_strength=0.25,
         key_deform_strength=0.0,
+        target_label=None,
     ):
         """Create one HalliGalli sample.
 
@@ -342,7 +343,22 @@ class HalliGalliGenerator:
             )
 
         # ── four key shapes ───────────────────────────────────────
-        corner_shapes = random.choices(ALL_SHAPES, k=4)
+        if target_label == 1:
+            # exactly one pair + two distinct singletons
+            pair = random.choice(ALL_SHAPES)
+            singletons = random.sample([s for s in ALL_SHAPES if s != pair], 2)
+            corner_shapes = [pair, pair] + singletons
+            random.shuffle(corner_shapes)
+        elif target_label == 0:
+            # equal mix of all-different (ABCD) and two-pairs (AABB)
+            if random.random() < 0.5:
+                corner_shapes = random.sample(ALL_SHAPES, 4)
+            else:
+                two = random.sample(ALL_SHAPES, 2)
+                corner_shapes = two * 2
+                random.shuffle(corner_shapes)
+        else:
+            corner_shapes = random.choices(ALL_SHAPES, k=4)
 
         for (cy, cx), shape_name in zip(positions, corner_shapes):
             # per-shape variation
