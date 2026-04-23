@@ -20,8 +20,8 @@ from sparse_wsi_vit.experiments.lightning_wrappers.mil_wrapper import MILWrapper
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 
 # ─── Data Details ──────────────────────────────────────────────
-CSV_BASE = "~/splits/tcga-emb/0/"
-FEATURES_DIR = "~/tcga-emb/"
+CSV_BASE = "~/splits/tcga-emb/0"
+FEATURES_DIR = "~/tcga-emb"
 
 # ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1  # Standard for MIL bags
