@@ -20,8 +20,7 @@ class WSIAttnWrapper(LightningWrapperBase):
             use_bce_loss: bool = True,
             training_crop_tokens: int | None = None,
             eval_crop_tokens: int | None = None,
-            compile_train: str | None = None,
-            compile_eval: str | None = None,
+            compile_mode: str | None = None,
     ):
         """Initialize the WSIAttnWrapper.
 
@@ -53,20 +52,13 @@ class WSIAttnWrapper(LightningWrapperBase):
             self.loss_metric = torch.nn.CrossEntropyLoss()
         else:
             self.loss_metric = torch.nn.BCEWithLogitsLoss()
-        if compile_train:
-            self.train_model = torch.compile(self.network, mode=compile_train)
-        else:
-            self.train_model = self.network
-        if compile_eval:
-            self.eval_model = torch.compile(self.network, mode=compile_eval)
-        else:
-            self.eval_model = self.network
+        if compile_mode is not None:
+            self.compile(mode=compile_mode)
 
     def _step(
             self,
             batch: dict[str, torch.Tensor],
             accuracy_calculator: torchmetrics.Metric,
-            net: torch.nn.Module | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
         """Shared forward + loss computation for train and validation.
 
@@ -81,10 +73,12 @@ class WSIAttnWrapper(LightningWrapperBase):
         coords = batch["coords"]
         labels = batch["label"]
 
-        if net is None:
-            output_dict = self.network(inputs, coords)
-        else:
-            output_dict = net(inputs, coords)
+        print(f"step with {inputs.shape=}")
+
+        torch._dynamo.mark_dynamic(inputs, 1)
+        torch._dynamo.mark_dynamic(coords, 1)
+
+        output_dict = self.network(inputs, coords)
 
         logits = output_dict["logits"].squeeze(1)
 
@@ -112,8 +106,10 @@ class WSIAttnWrapper(LightningWrapperBase):
         Returns:
             Scalar training loss.
         """
+        gc.collect()
+        torch.cuda.empty_cache()
         self._maybe_crop_batch(batch, self.training_crop_tokens)
-        loss, _, _ = self._step(batch, self.train_acc, net=self.train_model)
+        loss, _, _ = self._step(batch, self.train_acc)
         self.log(
             "train/loss",
             loss,
@@ -164,10 +160,8 @@ class WSIAttnWrapper(LightningWrapperBase):
         gc.collect()
         torch.cuda.empty_cache()
         self._maybe_crop_batch(batch, self.eval_crop_tokens)
-        torch._dynamo.mark_dynamic(batch["input"], 1)
-        torch._dynamo.mark_dynamic(batch["coords"], 1)
         with torch.inference_mode():
-            loss, _, _ = self._step(batch, self.val_acc, net=self.eval_model)
+            loss, _, _ = self._step(batch, self.val_acc)
         self.log(
             "val/loss",
             loss,

@@ -19,12 +19,15 @@ class VitDensePreEmbedded(nn.Module):
         in_features: Dimension D of each instance feature vector.
         hidden_dim: Dimension of the attention hidden layer.
         out_features: Number of output classes.
+        downproj: Reduce dimensionality via a Linear layer at the start
     """
 
     def __init__(
         self,
         in_features: int = 1280,
         out_features: int = 1,
+        checkpoint_activations=False,
+        downproj: int | None = None,
     ):
         super().__init__()
         self.out_features = out_features
@@ -34,16 +37,22 @@ class VitDensePreEmbedded(nn.Module):
             num_classes=out_features,
             drop_rate=0.0,
             drop_path_rate=0.1,
-            img_size=320,  # 320 * 320 = 102 400
+            # img_size=320,  # 320 * 320 = 102 400
             pre_embedded_input=True,
             ape=False,  # it's learnable, which breaks with variable size inputs.
             patch_size=1,  # each token is a patch, effectively
             rope=True,
             rope_dynamic=True,
-            embed_dim=in_features,
+            embed_dim=in_features if downproj is None else downproj,
             num_heads=8,
             depth=6,
+            checkpoint_activations=checkpoint_activations,
         )
+        self.down = nn.Linear(in_features, downproj) if downproj else None
+
+        if self.down:
+            nn.init.orthogonal_(self.down.weight)
+            nn.init.zeros_(self.down.bias)
 
     def forward(self, x: torch.Tensor, coords: torch.Tensor) -> dict:
         """Run a forward pass over a feature bag.
@@ -86,6 +95,9 @@ class VitDensePreEmbedded(nn.Module):
             raise ValueError(
                 f"Feature dimension mismatch: expected {self.in_features}, got {D}."
             )
+
+        if self.down is not None:
+            x = self.down(x)
 
         logits = self.vit5(x, coords)  # (B, out_features)
 

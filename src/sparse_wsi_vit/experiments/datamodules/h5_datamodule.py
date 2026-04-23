@@ -57,15 +57,18 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
     """
 
     def __init__(
-            self,
-            train_csv: str,
-            val_csv: str,
-            features_dir: str = "",
-            label_col_name: str = "label",
-            batch_size: int = 1,
-            num_workers: int = 4,
-            class_weights: bool = False,
-            worker_prefetch: int | None = None
+        self,
+        train_csv: str,
+        val_csv: str,
+        features_dir: str = "",
+        label_col_name: str = "label",
+        batch_size: int = 1,
+        num_workers: int = 4,
+        class_weights: bool = False,
+        worker_prefetch: int | None = None,
+        features_name: str = "features",
+        coords_name: str = "coords",
+        flatten_block: bool = True,
     ):
         super().__init__()
         self.train_csv = train_csv
@@ -78,6 +81,9 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         self.output_channels = 1
         self.class_weights = class_weights
         self.worker_prefetch = worker_prefetch
+        self.features_name = features_name
+        self.coords_name = coords_name
+        self.flatten_block = flatten_block
 
     def setup(self, stage: str | None = None) -> None:
         """Instantiate train and validation datasets.
@@ -91,11 +97,17 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
                 features_dir=self.features_dir,
                 label_col_name=self.label_col_name,
                 class_weights=self.class_weights,
+                features_name=self.features_name,
+                coords_name=self.coords_name,
+                flatten_block=self.flatten_block,
             )
             self.val_dataset = H5FeatureBagDataset(
                 csv_path=self.val_csv,
                 features_dir=self.features_dir,
                 label_col_name=self.label_col_name,
+                features_name=self.features_name,
+                coords_name=self.coords_name,
+                flatten_block=self.flatten_block,
             )
 
     def train_dataloader(self) -> DataLoader:
@@ -107,7 +119,7 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
             num_workers=self.num_workers,
             collate_fn=mil_collate_fn,
             pin_memory=True,
-            prefetch_factor=self.worker_prefetch
+            prefetch_factor=self.worker_prefetch,
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -119,5 +131,5 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
             num_workers=self.num_workers,
             collate_fn=mil_collate_fn,
             pin_memory=True,
-            prefetch_factor=self.worker_prefetch
+            prefetch_factor=self.worker_prefetch,
         )

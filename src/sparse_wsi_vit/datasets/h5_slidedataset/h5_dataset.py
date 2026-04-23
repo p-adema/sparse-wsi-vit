@@ -19,6 +19,9 @@ class H5FeatureBagDataset(Dataset):
             label_col_name="label",
             transform=None,
             class_weights=False,
+            features_name: str = "features",
+            coords_name: str = "coords",
+            flatten_block: bool = True
     ):
         """
         Args:
@@ -26,12 +29,18 @@ class H5FeatureBagDataset(Dataset):
             features_dir (str): Directory containing the extracted {slide_name}.h5 files.
             label_col_name (str): Column name in the CSV for the target label.
             transform (callable, optional): Optional transform applied to the bag of features.
+            features_name (str): Array key in H5 file for features
+            coords_name (str): Array key in H5 file for coordinates
+            flatten_block (bool): If features/coords have a block (64) dim, flatten it into L
         """
         super().__init__()
         self.features_dir = Path(features_dir)
         self.transform = transform
         self.label_col_name = label_col_name
         self.class_weights = class_weights
+        self.features_name = features_name
+        self.coords_name = coords_name
+        self.flatten_block = flatten_block
 
         # Load slide-level metadata
         df = pd.read_csv(csv_path)
@@ -96,8 +105,12 @@ class H5FeatureBagDataset(Dataset):
         h5_path = item["h5_path"]
 
         with h5py.File(h5_path, "r") as f:
-            features = f["features"][:]  # shape: (N_patches, 1280)
-            coords = f["coords"][:]  # shape: (N_patches, 2)
+            features = f[self.features_name][:]  # shape: (N_patches, 1280) or (N_blocks, 64, 1280)
+            coords = f[self.coords_name][:]  # shape: (N_patches, 2) or (N_blocks, 64, 2)
+
+        if self.flatten_block and len(features.shape) == 3:
+            features = features.reshape(-1, 1280)
+            coords = coords.reshape(-1, 2)
 
         features_t = torch.from_numpy(features).float()
         coords_t = torch.from_numpy(coords).float()
