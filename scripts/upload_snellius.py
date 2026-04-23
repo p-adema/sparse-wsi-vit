@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 from subprocess import run
 import argparse
+import datetime
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--local", type=Path, required=True)
@@ -22,6 +23,8 @@ while True:
     new_files = [f for f in args.local.glob("*.h5") if f not in processed]
     if new_files:
         print(f"found {len(new_files)} files...")
+    else:
+        print(f"no files found ({datetime.datetime.now()})")
     # Wait for files to be saved properly
     time.sleep(60)
     for file in new_files:
