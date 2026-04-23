@@ -52,7 +52,7 @@ GRAD_CLIP                    = 1.0
 
 def get_config() -> ExperimentConfig:
     config = ExperimentConfig()
-    config.debug = True   # set False for online W&B logging on Snellius
+    config.debug = False
     config.seed  = 42
 
     config.dataset = LazyConfig(HalliGalliDataModule)(
