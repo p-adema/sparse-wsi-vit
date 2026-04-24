@@ -19,10 +19,8 @@ from sparse_wsi_vit.experiments.lightning_wrappers.mil_wrapper import MILWrapper
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 
 # ─── Data Details ──────────────────────────────────────────────
-CSV_BASE = "/media/davidwessels/ananas/data/David-SELECT-AI/csvs/multibiomarker"
-FEATURES_DIR = (
-    "/media/davidwessels/ananas/data/David-SELECT-AI/outputs/virchow_tissue_features"
-)
+CSV_BASE = "/home/scur0097/splits/camelyon/0"
+FEATURES_DIR = "/scratch-shared/scur0097/camelyon-emb"
 
 # ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1  # Standard for MIL bags
@@ -49,7 +47,7 @@ def get_config() -> ExperimentConfig:
         train_csv=f"{CSV_BASE}/combined_tcga_amc_part1.csv",
         val_csv=f"{CSV_BASE}/combined_tcga_amc_part1.csv",  # Replace with actual val split!
         features_dir=FEATURES_DIR,
-        label_col_name="tmb_binary",  # Changed from 'label' to an actual column present in the CSV
+        label_col_name="label",  # Changed from 'label' to an actual column present in the CSV
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
         output_channels= OUT_FEATURES,
