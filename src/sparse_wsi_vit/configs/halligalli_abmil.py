@@ -1,17 +1,13 @@
-"""ABMIL on the HalliGalli synthetic long-range reasoning benchmark.
+"""ABMIL on pre-extracted Virchow2 features from HalliGalli synthetic images.
 
-image_size=2048, patch_size=16  →  N=16 384 patches, D=768 per bag.
-Only 4 of 16 384 patches carry key-shape signal (0.024% informative),
-matching the extreme-context regime of real WSI MIL.
-
-Generation note: clutter_density is kept low (4) to avoid the data
-pipeline becoming the bottleneck at this image scale (~250 clutter
-elements vs ~950 at the default density of 15).
+Virchow2 (1280-dim CLS token) is used as a frozen patch encoder.
+Features are pre-extracted by extract_halligalli.py.
 
 Usage:
     uv run experiments/run.py --config src/sparse_wsi_vit/configs/halligalli_abmil.py
 """
 
+import os
 import torch
 
 from sparse_wsi_vit.experiments.default_cfg import (
@@ -23,24 +19,16 @@ from sparse_wsi_vit.experiments.default_cfg import (
 from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
 from sparse_wsi_vit.models.abmil import ABMIL
 from sparse_wsi_vit.experiments.lightning_wrappers.mil_wrapper import MILWrapper
-from sparse_wsi_vit.experiments.datamodules.halligalli_datamodule import HalliGalliDataModule
+from sparse_wsi_vit.experiments.datamodules.halligalli_h5_datamodule import HalliGalliH5DataModule
 
 # ─── Data ────────────────────────────────────────────────────────────────────
-IMAGE_SIZE       = 2048  # → 128×128 = 16 384 patches per bag; 4/16 384 = 0.024% informative
-PATCH_SIZE       = 16    # → D = 3×16² = 768
-CLUTTER_DENSITY  = 4     # low to prevent generation from bottlenecking the GPU
-TRAIN_SIZE       = 2000
-VAL_SIZE         = 400
-
-# ─── Architecture ────────────────────────────────────────────────────────────
-# in_features / out_features are injected by the runner from the datamodule;
-# values here are for readability only.
-IN_FEATURES  = 3 * PATCH_SIZE ** 2   # 768 (unchanged)
-OUT_FEATURES = 2                      # binary, CrossEntropy
+DATA_DIR    = os.environ["HALLIGALLI_DATA_DIR"]  # set in job script: export HALLIGALLI_DATA_DIR=/scratch-shared/$USER/halligalli_virchow
+IN_FEATURES = 1280                       # Virchow2 CLS token; use 2560 if --concat_tokens
+OUT_FEATURES = 2                         # binary, CrossEntropy
 
 # ─── Optimisation ────────────────────────────────────────────────────────────
-BATCH_SIZE    = 8    # each bag is 16 384 × 768 × 2 bytes (bf16) ≈ 24 MB
-NUM_WORKERS   = 8    # 8 workers × ~100 MB each ≈ 0.8 GB at 2048px
+BATCH_SIZE    = 1     # standard for MIL bags
+NUM_WORKERS   = 4
 PRECISION     = "bf16-mixed"
 
 TRAINING_ITERATIONS          = 5_000
@@ -48,6 +36,7 @@ WARMUP_ITERATIONS_PERCENTAGE = 0.05
 LEARNING_RATE                = 2e-4
 WEIGHT_DECAY                 = 1e-4
 GRAD_CLIP                    = 1.0
+ACCUMULATE_GRAD_STEPS        = 8     # effective batch size = 8
 
 
 def get_config() -> ExperimentConfig:
@@ -55,12 +44,9 @@ def get_config() -> ExperimentConfig:
     config.debug = False
     config.seed  = 42
 
-    config.dataset = LazyConfig(HalliGalliDataModule)(
-        image_size=IMAGE_SIZE,
-        patch_size=PATCH_SIZE,
-        clutter_density=CLUTTER_DENSITY,
-        train_size=TRAIN_SIZE,
-        val_size=VAL_SIZE,
+    config.dataset = LazyConfig(HalliGalliH5DataModule)(
+        data_dir=DATA_DIR,
+        in_features=IN_FEATURES,
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
     )
@@ -73,7 +59,7 @@ def get_config() -> ExperimentConfig:
     )
 
     config.lightning_wrapper_class = LazyConfig(MILWrapper)(
-        use_bce_loss=(OUT_FEATURES == 1),   # False → CrossEntropyLoss
+        use_bce_loss=(OUT_FEATURES == 1),
     )
 
     config.optimizer = LazyConfig(torch.optim.AdamW)(
@@ -86,6 +72,7 @@ def get_config() -> ExperimentConfig:
         iterations=TRAINING_ITERATIONS,
         grad_clip=GRAD_CLIP,
         precision=PRECISION,
+        accumulate_grad_steps=ACCUMULATE_GRAD_STEPS,
     )
 
     config.scheduler = SchedulerConfig(
@@ -97,7 +84,7 @@ def get_config() -> ExperimentConfig:
 
     config.wandb = WandbConfig(
         project="wsi-classification",
-        job_group="halligalli_abmil",
+        job_group="halligalli_abmil_virchow",
     )
 
     return config

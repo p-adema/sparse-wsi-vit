@@ -22,13 +22,14 @@ Output layout
 
 Usage
 -----
-    uv run src/sparse_wsi_vit/datasets/halligalli_dataset/extract_halligalli_virchow.py \\
-        --output_dir data/halligalli_virchow \\
+    uv run src/sparse_wsi_vit/datasets/halligalli_dataset/extract_halligalli.py \\
+        --output_dir data/halligalli \\
         --hf_token <YOUR_HF_TOKEN>
 """
 
 import argparse
 import gc
+import json
 from pathlib import Path
 
 import h5py
@@ -215,6 +216,22 @@ def main():
         "separation": args.separation,
         "clutter_density": args.clutter_density,
     }
+
+    metadata = {
+        "train_size":      args.train_size,
+        "val_size":        args.val_size,
+        "test_size":       args.test_size,
+        "image_size":      args.image_size,
+        "patch_size":      args.patch_size,
+        "separation":      args.separation,
+        "clutter_density": args.clutter_density,
+        "concat_tokens":   args.concat_tokens,
+        "feature_dim":     2560 if args.concat_tokens else 1280,
+        "encoder":         "paige-ai/Virchow2",
+    }
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    (args.output_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))
+    print(f"Metadata written to {args.output_dir / 'metadata.json'}")
 
     for split, n in [("train", args.train_size), ("val", args.val_size), ("test", args.test_size)]:
         print(f"\nProcessing {split} split ({n} samples)...")
