@@ -44,8 +44,8 @@ def get_config() -> ExperimentConfig:
     config.dataset = LazyConfig(
         H5FeatureBagDataModule
     )(
-        train_csv=f"{CSV_BASE}/combined_tcga_amc_part1.csv",
-        val_csv=f"{CSV_BASE}/combined_tcga_amc_part1.csv",  # Replace with actual val split!
+        train_csv=f"{CSV_BASE}/train.csv",
+        val_csv=f"{CSV_BASE}/val.csv",  # Replace with actual val split!
         features_dir=FEATURES_DIR,
         label_col_name="label",  # Changed from 'label' to an actual column present in the CSV
         batch_size=BATCH_SIZE,
