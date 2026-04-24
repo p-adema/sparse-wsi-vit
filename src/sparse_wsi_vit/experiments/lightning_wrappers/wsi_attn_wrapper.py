@@ -73,8 +73,6 @@ class WSIAttnWrapper(LightningWrapperBase):
         coords = batch["coords"]
         labels = batch["label"]
 
-        print(f"step with {inputs.shape=}")
-
         torch._dynamo.mark_dynamic(inputs, 1)
         torch._dynamo.mark_dynamic(coords, 1)
 
