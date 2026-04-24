@@ -12,14 +12,16 @@ import numpy as np
 def broadcat(freqss, dim=-1):
     num_freqss = len(freqss)
     shape_lens = set(list(map(lambda t: len(t.shape), freqss)))
-    assert len(shape_lens) == 1, "freqss must all have the same number of dimensions"
+    if not torch.compiler.is_compiling():
+        assert len(shape_lens) == 1, "freqss must all have the same number of dimensions"
     shape_len = list(shape_lens)[0]
     dim = (dim + shape_len) if dim < 0 else dim
     dims = list(zip(*map(lambda t: list(t.shape), freqss)))
     expandable_dims = [(i, val) for i, val in enumerate(dims) if i != dim]
-    assert all([*map(lambda t: len(set(t[1])) <= 2, expandable_dims)]), (
-        "invalid dimensions for broadcastable concatentation"
-    )
+    if not torch.compiler.is_compiling():
+        assert all([*map(lambda t: len(set(t[1])) <= 2, expandable_dims)]), (
+            "invalid dimensions for broadcastable concatentation"
+        )
     max_dims = list(map(lambda t: (t[0], max(t[1])), expandable_dims))
     expanded_dims = list(map(lambda t: (t[0], (t[1],) * num_freqss), max_dims))
     expanded_dims.insert(dim, (dim, dims[dim]))
@@ -103,9 +105,10 @@ class VisionRotaryEmbedding(nn.Module):
 
 
 def rotate_freqs(freqs, angle_deg):
-    assert freqs.ndim == 4 and freqs.shape[0] == freqs.shape[1], (
-        "Input must have shape (n, n, d1, d2)"
-    )
+    if not torch.compiler.is_compiling():
+        assert freqs.ndim == 4 and freqs.shape[0] == freqs.shape[1], (
+            "Input must have shape (n, n, d1, d2)"
+        )
     n, _, d1, d2 = freqs.shape
     freq_type = freqs.dtype
     angle_rad = math.radians(angle_deg)
