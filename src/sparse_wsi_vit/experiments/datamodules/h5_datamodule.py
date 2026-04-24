@@ -58,6 +58,7 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         label_col_name: str = "label",
         batch_size: int = 1,
         num_workers: int = 4,
+        output_channels: int = 1, # N output classes, based on the baseline type
     ):
         super().__init__()
         self.train_csv = train_csv
@@ -67,7 +68,7 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.input_channels = 1280
-        self.output_channels = 1
+        self.output_channels = output_channels # Dynamic output classes!
 
     def setup(self, stage: str | None = None) -> None:
         """Instantiate train and validation datasets.
