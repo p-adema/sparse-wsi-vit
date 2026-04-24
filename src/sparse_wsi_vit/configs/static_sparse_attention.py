@@ -20,8 +20,8 @@ from sparse_wsi_vit.experiments.lightning_wrappers.mil_wrapper import MILWrapper
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 
 # ─── Data Details ──────────────────────────────────────────────
-CSV_BASE = "../amc-data"
-FEATURES_DIR = "../amc-data"
+CSV_BASE = "~/splits/tcga-emb/0"
+FEATURES_DIR = "~/tcga-emb"
 
 # ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1  # Standard for MIL bags
@@ -29,9 +29,9 @@ NUM_WORKERS = 4
 IN_FEATURES = 1280
 OUT_FEATURES = 1  # Binary task
 PRECISION = "bf16-mixed"
-EMBED_DIM = 64
-NUM_HEADS = 1
-NUM_LAYERS = 2
+EMBED_DIM = 256
+NUM_HEADS = 4
+NUM_LAYERS = 12
 NUM_CLS = 2
 WINDOW_SIZE = 3
 DILATION = 1
@@ -52,8 +52,8 @@ def get_config() -> ExperimentConfig:
     config.dataset = LazyConfig(
         H5FeatureBagDataModule
     )(
-        train_csv=f"{CSV_BASE}/combined_tcga_amc.csv",
-        val_csv=f"{CSV_BASE}/combined_tcga_amc.csv",  # Replace with actual val split!
+        train_csv=f"{CSV_BASE}/train.csv",
+        val_csv=f"{CSV_BASE}/val.csv",  # Replace with actual val split!
         features_dir=FEATURES_DIR,
         label_col_name="tmb_binary",  # Changed from 'label' to an actual column present in the CSV
         batch_size=BATCH_SIZE,

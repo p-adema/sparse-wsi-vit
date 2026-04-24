@@ -29,7 +29,7 @@ Shape difficulty
 - Smooth elastic deformation of the coordinate grid.
 - Random color (uninformative).
 - Partial-shape confounders near key positions.
-- Dense background clutter (blobs, lines, rectangles).
+- Dense background clutter (blobs, lines, diagonal lines).
 
 Reference
 ---------
@@ -182,7 +182,7 @@ def _draw_clutter(
     """Scatter dense visual clutter across the canvas.
 
     *density* is the average number of elements per 256×256 region.
-    Elements: small blobs, short lines, tiny rectangles.
+    Elements: small blobs, short lines, diagonal lines.
     Clutter whose centre falls within *exclude_radius* of any position
     in *exclude_positions* is rejected and resampled.
     """
@@ -232,12 +232,14 @@ def _draw_clutter(
             canvas[y0:y1, x0:x1] = color
 
         else:
-            # tiny rectangle
-            rh = np.random.randint(min_r, max_r + 1)
-            rw = np.random.randint(min_r, max_r + 1)
-            y0, y1 = max(0, cy - rh), min(H, cy + rh)
-            x0, x1 = max(0, cx - rw), min(W, cx + rw)
-            canvas[y0:y1, x0:x1] = color
+            # diagonal line (visually distinct from all key shapes)
+            length = np.random.randint(min_r, max_r * 3)
+            thick = max(1, np.random.randint(1, min_r + 1))
+            sign = 1 if np.random.rand() < 0.5 else -1
+            for t in range(-thick // 2, thick // 2 + 1):
+                ys = np.clip(np.arange(cy, cy + length), 0, H - 1)
+                xs = np.clip(cy + np.arange(length) * sign + cx - cy + t, 0, W - 1).astype(int)
+                canvas[ys, xs] = color
 
         placed += 1
 
@@ -309,6 +311,7 @@ class HalliGalliGenerator:
         scale_jitter=0.3,
         deform_strength=0.25,
         key_deform_strength=0.0,
+        target_label=None,
     ):
         """Create one HalliGalli sample.
 
@@ -342,7 +345,22 @@ class HalliGalliGenerator:
             )
 
         # ── four key shapes ───────────────────────────────────────
-        corner_shapes = random.choices(ALL_SHAPES, k=4)
+        if target_label == 1:
+            # exactly one pair + two distinct singletons
+            pair = random.choice(ALL_SHAPES)
+            singletons = random.sample([s for s in ALL_SHAPES if s != pair], 2)
+            corner_shapes = [pair, pair] + singletons
+            random.shuffle(corner_shapes)
+        elif target_label == 0:
+            # equal mix of all-different (ABCD) and two-pairs (AABB)
+            if random.random() < 0.5:
+                corner_shapes = random.sample(ALL_SHAPES, 4)
+            else:
+                two = random.sample(ALL_SHAPES, 2)
+                corner_shapes = two * 2
+                random.shuffle(corner_shapes)
+        else:
+            corner_shapes = random.choices(ALL_SHAPES, k=4)
 
         for (cy, cx), shape_name in zip(positions, corner_shapes):
             # per-shape variation

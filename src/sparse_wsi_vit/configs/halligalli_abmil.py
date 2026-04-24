@@ -1,12 +1,12 @@
 """ABMIL on the HalliGalli synthetic long-range reasoning benchmark.
 
-image_size=4096, patch_size=16  →  N=65 536 patches, D=768 per bag.
-Only 4 of 65 536 patches carry key-shape signal (0.006% informative),
+image_size=2048, patch_size=16  →  N=16 384 patches, D=768 per bag.
+Only 4 of 16 384 patches carry key-shape signal (0.024% informative),
 matching the extreme-context regime of real WSI MIL.
 
 Generation note: clutter_density is kept low (4) to avoid the data
-pipeline becoming the bottleneck at this image scale (~1 000 clutter
-elements vs ~3 800 at the default density of 15).
+pipeline becoming the bottleneck at this image scale (~250 clutter
+elements vs ~950 at the default density of 15).
 
 Usage:
     uv run experiments/run.py --config src/sparse_wsi_vit/configs/halligalli_abmil.py
@@ -26,7 +26,7 @@ from sparse_wsi_vit.experiments.lightning_wrappers.mil_wrapper import MILWrapper
 from sparse_wsi_vit.experiments.datamodules.halligalli_datamodule import HalliGalliDataModule
 
 # ─── Data ────────────────────────────────────────────────────────────────────
-IMAGE_SIZE       = 4096  # → 256×256 = 65 536 patches per bag; 4/65 536 = 0.006% informative
+IMAGE_SIZE       = 2048  # → 128×128 = 16 384 patches per bag; 4/16 384 = 0.024% informative
 PATCH_SIZE       = 16    # → D = 3×16² = 768
 CLUTTER_DENSITY  = 4     # low to prevent generation from bottlenecking the GPU
 TRAIN_SIZE       = 2000
@@ -35,12 +35,12 @@ VAL_SIZE         = 400
 # ─── Architecture ────────────────────────────────────────────────────────────
 # in_features / out_features are injected by the runner from the datamodule;
 # values here are for readability only.
-IN_FEATURES  = 3 * PATCH_SIZE ** 2   # 768
+IN_FEATURES  = 3 * PATCH_SIZE ** 2   # 768 (unchanged)
 OUT_FEATURES = 2                      # binary, CrossEntropy
 
 # ─── Optimisation ────────────────────────────────────────────────────────────
-BATCH_SIZE    = 8    # reduced: each bag is 65 536 × 768 × 2 bytes (bf16) ≈ 96 MB
-NUM_WORKERS   = 8    # more workers to keep up with generation at 4096px
+BATCH_SIZE    = 8    # each bag is 16 384 × 768 × 2 bytes (bf16) ≈ 24 MB
+NUM_WORKERS   = 8    # 8 workers × ~100 MB each ≈ 0.8 GB at 2048px
 PRECISION     = "bf16-mixed"
 
 TRAINING_ITERATIONS          = 5_000
@@ -52,7 +52,7 @@ GRAD_CLIP                    = 1.0
 
 def get_config() -> ExperimentConfig:
     config = ExperimentConfig()
-    config.debug = True   # set False for online W&B logging on Snellius
+    config.debug = False
     config.seed  = 42
 
     config.dataset = LazyConfig(HalliGalliDataModule)(
