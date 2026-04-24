@@ -79,7 +79,7 @@ class H5FeatureBagDataset(Dataset):
         h5_path = item["h5_path"]
 
         with h5py.File(h5_path, "r") as f:
-            features = f["cls_224x224"][:] #f["features"][:]  # shape: (N_patches, 1280)
+            features = f["cls_224x224"][:].mean(axis=1) #f["features"][:]  # shape: (N_patches, 1280)
             coords = f["coords_224x224"][:] #f["coords"][:]  # shape: (N_patches, 2)
 
         features_t = torch.from_numpy(features).float()
