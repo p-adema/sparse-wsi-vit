@@ -22,8 +22,8 @@ from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import (
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 
 # ─── Data Details ──────────────────────────────────────────────
-CSV_BASE = "../splits/tcga-emb-atleast16k/0"
-FEATURES_DIR = "../tcga-emb"
+CSV_BASE = "../splits/tcga-tmb/0"
+FEATURES_DIR = "../tcga-v2/"
 
 # ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1  # Standard for MIL bags
@@ -33,6 +33,7 @@ CLASS_WEIGHTS = True  # this TCGA dataset has more cancer than healthy
 IN_FEATURES = 1280
 OUT_FEATURES = 1  # Binary tasks
 PRECISION = "bf16-mixed"
+CHECKPOINT_ACTIVATIONS = True  # instead of cropping
 
 TRAINING_ITERATIONS = 10_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
@@ -57,21 +58,24 @@ def get_config() -> ExperimentConfig:
         num_workers=NUM_WORKERS,
         class_weights=CLASS_WEIGHTS,
         worker_prefetch=WORKER_PREFETCH,
+        features_name="cls_224x224",  # low resolution!
+        coords_name="coords_224x224",
     )
 
     # Network: The very sketchy ViT-5/Small network
     config.net = LazyConfig(VitDensePreEmbedded)(
         in_features=IN_FEATURES,
         out_features=OUT_FEATURES,
+        checkpoint_activations=CHECKPOINT_ACTIVATIONS,
+        # downproj=768,  # this is bad! but I need it for now to keep VRAM low because I have other processes running too.
     )
 
     # Lightning wrapper mappings
     config.lightning_wrapper_class = LazyConfig(WSIAttnWrapper)(
         use_bce_loss=(OUT_FEATURES == 1),
-        training_crop_tokens=2 ** 14 - 5,  # 16 379 (+ CLS + 4REG = 2**13),
-        eval_crop_tokens=2 ** 16 - 5,  # 65 531
-        compile_train="max-autotune-no-cudagraphs",
-        compile_eval="max-autotune-no-cudagraphs",
+        training_crop_tokens=None,  # Don't crop here!
+        eval_crop_tokens=None,
+        compile_mode="max-autotune-no-cudagraphs",
     )
 
     # Optimizer
@@ -86,7 +90,7 @@ def get_config() -> ExperimentConfig:
         iterations=TRAINING_ITERATIONS,
         grad_clip=GRAD_CLIP,
         precision=PRECISION,
-        accumulate_grad_steps=ACCUMULATE_GRAD_STEPS
+        accumulate_grad_steps=ACCUMULATE_GRAD_STEPS,
     )
 
     # Scheduler
@@ -101,6 +105,7 @@ def get_config() -> ExperimentConfig:
     config.wandb = WandbConfig(
         project="wsi-classification",
         job_group="baseline_vit5",
+        entity="dl2-2026"
     )
 
     return config
