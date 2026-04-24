@@ -105,6 +105,7 @@ def get_config() -> ExperimentConfig:
     config.wandb = WandbConfig(
         project="wsi-classification",
         job_group="baseline_vit5",
+        entity="dl2-2026"
     )
 
     return config
