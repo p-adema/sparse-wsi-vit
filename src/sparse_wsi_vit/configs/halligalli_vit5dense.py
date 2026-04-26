@@ -33,7 +33,7 @@ PRECISION     = "bf16-mixed"
 
 TRAINING_ITERATIONS          = 5_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
-LEARNING_RATE                = 2e-4
+LEARNING_RATE                = 5e-5
 WEIGHT_DECAY                 = 1e-4
 GRAD_CLIP                    = 1.0
 ACCUMULATE_GRAD_STEPS        = 8
