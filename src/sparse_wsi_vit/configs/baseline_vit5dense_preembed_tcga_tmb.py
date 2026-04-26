@@ -1,7 +1,7 @@
 """ViT-5 classification config for debugging, training on first split from TCGA-like embeddings
 
 Usage:
-    uv run experiments/run.py --config src/sparse_wsi_vit/configs/baseline_vit5dense_preembed_tcga.py
+    uv run experiments/run.py --config src/sparse_wsi_vit/configs/baseline_vit5dense_preembed_tcga_tmb.py
 """
 
 import torch
