@@ -11,6 +11,7 @@ import os
 import torch
 
 from sparse_wsi_vit.experiments.default_cfg import (
+    AutoResumeConfig,
     ExperimentConfig,
     SchedulerConfig,
     TrainConfig,
@@ -31,7 +32,7 @@ BATCH_SIZE    = 1     # standard for MIL bags
 NUM_WORKERS   = 4
 PRECISION     = "bf16-mixed"
 
-TRAINING_ITERATIONS          = 5_000
+TRAINING_ITERATIONS          = 500
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
 LEARNING_RATE                = 5e-5
 WEIGHT_DECAY                 = 1e-4
@@ -49,6 +50,7 @@ def get_config() -> ExperimentConfig:
         in_features=IN_FEATURES,
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
+        corners_only=True,
     )
 
     config.net = LazyConfig(VitDensePreEmbedded)(
@@ -60,7 +62,7 @@ def get_config() -> ExperimentConfig:
         use_bce_loss=(OUT_FEATURES == 1),
         training_crop_tokens=None,
         eval_crop_tokens=None,
-        compile_mode="max-autotune-no-cudagraphs",
+        compile_mode=None,
     )
 
     config.optimizer = LazyConfig(torch.optim.AdamW)(
@@ -85,7 +87,9 @@ def get_config() -> ExperimentConfig:
 
     config.wandb = WandbConfig(
         project="wsi-classification",
-        job_group="halligalli_vit5dense",
+        job_group="halligalli_vit5dense_corners",
     )
+
+    config.autoresume = AutoResumeConfig(enabled=False)
 
     return config
