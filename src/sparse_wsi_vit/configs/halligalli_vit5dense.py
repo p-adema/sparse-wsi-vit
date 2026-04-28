@@ -32,7 +32,8 @@ BATCH_SIZE    = 1     # standard for MIL bags
 NUM_WORKERS   = 4
 PRECISION     = "bf16-mixed"
 
-TRAINING_ITERATIONS          = 500
+DOWNPROJ                     = 256   # project 1280 → 256 before the transformer
+TRAINING_ITERATIONS          = 5_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
 LEARNING_RATE                = 5e-5
 WEIGHT_DECAY                 = 1e-4
@@ -50,12 +51,12 @@ def get_config() -> ExperimentConfig:
         in_features=IN_FEATURES,
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
-        corners_only=True,
     )
 
     config.net = LazyConfig(VitDensePreEmbedded)(
         in_features=IN_FEATURES,
         out_features=OUT_FEATURES,
+        downproj=DOWNPROJ,
     )
 
     config.lightning_wrapper_class = LazyConfig(WSIAttnWrapper)(
@@ -87,7 +88,7 @@ def get_config() -> ExperimentConfig:
 
     config.wandb = WandbConfig(
         project="wsi-classification",
-        job_group="halligalli_vit5dense_corners",
+        job_group="halligalli_vit5dense_downproj256",
     )
 
     config.autoresume = AutoResumeConfig(enabled=False)
