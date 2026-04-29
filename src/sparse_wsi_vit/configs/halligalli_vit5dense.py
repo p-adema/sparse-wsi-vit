@@ -11,7 +11,6 @@ import os
 import torch
 
 from sparse_wsi_vit.experiments.default_cfg import (
-    AutoResumeConfig,
     ExperimentConfig,
     SchedulerConfig,
     TrainConfig,
@@ -88,9 +87,7 @@ def get_config() -> ExperimentConfig:
 
     config.wandb = WandbConfig(
         project="wsi-classification",
-        job_group="halligalli_vit5dense_downproj256",
+        job_group="halligalli_vit5dense_easy",
     )
-
-    config.autoresume = AutoResumeConfig(enabled=False)
 
     return config

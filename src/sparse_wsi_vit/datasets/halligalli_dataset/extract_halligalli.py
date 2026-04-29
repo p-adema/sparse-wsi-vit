@@ -103,8 +103,7 @@ def _extract_split(
     feat_dir = output_dir / split / "features"
     feat_dir.mkdir(parents=True, exist_ok=True)
 
-    n_h = image_size // patch_size
-    n_w = image_size // patch_size
+    n_patches_per_side = image_size // patch_size
     rows = []
 
     for idx in tqdm(range(n_samples), desc=split):
@@ -112,12 +111,13 @@ def _extract_split(
         out_file = feat_dir / f"{sample_name}.h5"
         partial_file = feat_dir / f"{sample_name}.partial"
 
-        if out_file.exists() or partial_file.exists():
-            # Re-read label from existing file to rebuild CSV on resume
-            if out_file.exists():
-                with h5py.File(out_file, "r") as f:
-                    label = int(f.attrs["label"])
-                rows.append({"slidename": sample_name, "label": label})
+        if partial_file.exists():
+            partial_file.unlink()  # crashed mid-write; re-extract cleanly
+
+        if out_file.exists():
+            with h5py.File(out_file, "r") as f:
+                label = int(f.attrs["label"])
+            rows.append({"slidename": sample_name, "label": label})
             continue
 
         img, label, _, _ = HalliGalliGenerator.generate_single(
@@ -130,8 +130,8 @@ def _extract_split(
         batch_imgs = []
         batch_coords = []
 
-        for pi in range(n_h):
-            for pj in range(n_w):
+        for pi in range(n_patches_per_side):
+            for pj in range(n_patches_per_side):
                 y0, x0 = pi * patch_size, pj * patch_size
                 patch = img_uint8[y0:y0 + patch_size, x0:x0 + patch_size]
                 batch_imgs.append(model.transform(Image.fromarray(patch)))
@@ -171,8 +171,7 @@ def _extract_split(
                 chunk_imgs = batch_imgs[start:start + batch_size]
                 chunk_coords = batch_coords[start:start + batch_size]
                 batch_tensor = torch.stack(chunk_imgs).to(model.device)
-                with torch.no_grad():
-                    feats_np = model(batch_tensor).cpu().numpy()
+                feats_np = model(batch_tensor).cpu().numpy()
                 _write_batch(feats_np, np.array(chunk_coords, dtype=np.int32))
 
         partial_file.rename(out_file)
@@ -197,6 +196,10 @@ def main():
                         help="Patch size in pixels. Each patch is resized to 224×224 for Virchow2.")
     parser.add_argument("--separation", type=float, default=1.0)
     parser.add_argument("--clutter_density", type=float, default=4)
+    parser.add_argument("--shape_radius", type=int, default=None,
+                        help="Radius of key shapes in pixels. Defaults to image_size * 0.008.")
+    parser.add_argument("--confounders_per_key", type=int, default=2,
+                        help="Partial-shape fragments placed near each key shape. Set 0 to disable.")
     parser.add_argument("--hf_token", type=str, default=None)
     parser.add_argument("--concat_tokens", action="store_true",
                         help="Use 2560-dim (CLS + mean patch) instead of 1280-dim (CLS only)")
@@ -215,19 +218,23 @@ def main():
     generator_kwargs = {
         "separation": args.separation,
         "clutter_density": args.clutter_density,
+        "confounders_per_key": args.confounders_per_key,
+        "shape_radius": args.shape_radius,
     }
 
     metadata = {
-        "train_size":      args.train_size,
-        "val_size":        args.val_size,
-        "test_size":       args.test_size,
-        "image_size":      args.image_size,
-        "patch_size":      args.patch_size,
-        "separation":      args.separation,
-        "clutter_density": args.clutter_density,
-        "concat_tokens":   args.concat_tokens,
-        "feature_dim":     2560 if args.concat_tokens else 1280,
-        "encoder":         "paige-ai/Virchow2",
+        "train_size":         args.train_size,
+        "val_size":           args.val_size,
+        "test_size":          args.test_size,
+        "image_size":         args.image_size,
+        "patch_size":         args.patch_size,
+        "separation":         args.separation,
+        "clutter_density":    args.clutter_density,
+        "shape_radius":       args.shape_radius,
+        "confounders_per_key": args.confounders_per_key,
+        "concat_tokens":      args.concat_tokens,
+        "feature_dim":        2560 if args.concat_tokens else 1280,
+        "encoder":            "paige-ai/Virchow2",
     }
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))

@@ -1,7 +1,6 @@
 """Tests for HalliGalliGenerator."""
 
 import numpy as np
-import pytest
 from collections import Counter
 
 from sparse_wsi_vit.datasets.halligalli_dataset.halligalli import (
@@ -40,14 +39,51 @@ def test_generate_single_shapes_from_vocabulary():
     assert all(s in ALL_SHAPES for s in shapes)
 
 
-def test_generate_single_label_exactly_one_pair():
-    """Label is 1 iff exactly one shape type appears exactly twice."""
+def test_generate_single_label_any_pair():
+    """Label is 1 iff any shape type appears more than once."""
     for _ in range(50):
         _, label, shapes, _ = HalliGalliGenerator.generate_single(image_size=32)
         counts = Counter(shapes)
-        pairs = [s for s, n in counts.items() if n == 2]
-        expected = 1 if len(pairs) == 1 else 0
+        expected = 1 if any(n >= 2 for n in counts.values()) else 0
         assert label == expected
+
+
+def test_target_label_0_all_distinct():
+    """target_label=0 always yields four distinct corner shapes."""
+    for _ in range(30):
+        _, label, shapes, _ = HalliGalliGenerator.generate_single(
+            image_size=32, target_label=0
+        )
+        assert label == 0
+        assert len(set(shapes)) == 4, f"Expected 4 distinct shapes, got {shapes}"
+
+
+def test_target_label_1_has_pair():
+    """target_label=1 always yields at least one repeated shape."""
+    for _ in range(30):
+        _, label, shapes, _ = HalliGalliGenerator.generate_single(
+            image_size=32, target_label=1
+        )
+        assert label == 1
+        counts = Counter(shapes)
+        assert any(n >= 2 for n in counts.values()), f"No pair found in {shapes}"
+
+
+def test_shape_radius_parameter():
+    """Custom shape_radius is accepted without error."""
+    img, _, _, _ = HalliGalliGenerator.generate_single(
+        image_size=64, shape_radius=20, target_label=1
+    )
+    assert img.shape == (64, 64, 3)
+
+
+def test_confounders_per_key_zero():
+    """confounders_per_key=0 runs without error."""
+    img, label, shapes, _ = HalliGalliGenerator.generate_single(
+        image_size=64, confounders_per_key=0, target_label=0
+    )
+    assert img.shape == (64, 64, 3)
+    assert label == 0
 
 
 def test_generate_single_separation_affects_positions():
@@ -64,22 +100,3 @@ def test_generate_single_separation_affects_positions():
 
     assert spread(0.9) > spread(0.3)
 
-
-@pytest.mark.parametrize("target_label", [0, 1])
-def test_target_label_is_respected(target_label):
-    """generate_single with target_label always returns the requested label."""
-    for _ in range(20):
-        _, label, _, _ = HalliGalliGenerator.generate_single(
-            image_size=32, target_label=target_label
-        )
-        assert label == target_label
-
-
-def test_target_label_alternation_is_balanced():
-    """Alternating target_label=idx%2 yields exactly 50/50 label split."""
-    labels = [
-        HalliGalliGenerator.generate_single(image_size=32, target_label=i % 2)[1]
-        for i in range(100)
-    ]
-    assert labels.count(0) == 50
-    assert labels.count(1) == 50

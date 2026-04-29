@@ -1,8 +1,9 @@
 """HalliGalli: a synthetic benchmark for long-range spatial reasoning.
 
 Four "key" shapes are placed at symmetric positions in the image
-(corners by default).  The **global binary label** is 1 when exactly
-one pair of matching shape types exists among the four, and 0 otherwise.
+(corners by default).  The **global binary label** is 1 when any two
+corners share the same shape type (at least one matching pair), and 0
+when all four corners show distinct shapes.
 No single patch carries enough information to solve the task — the model
 must compare distant patches against each other.
 
@@ -352,13 +353,8 @@ class HalliGalliGenerator:
             corner_shapes = [pair, pair] + singletons
             random.shuffle(corner_shapes)
         elif target_label == 0:
-            # equal mix of all-different (ABCD) and two-pairs (AABB)
-            if random.random() < 0.5:
-                corner_shapes = random.sample(ALL_SHAPES, 4)
-            else:
-                two = random.sample(ALL_SHAPES, 2)
-                corner_shapes = two * 2
-                random.shuffle(corner_shapes)
+            # all four corners are distinct shapes (no pair exists)
+            corner_shapes = random.sample(ALL_SHAPES, 4)
         else:
             corner_shapes = random.choices(ALL_SHAPES, k=4)
 
@@ -415,8 +411,7 @@ class HalliGalliGenerator:
 
         # ── label ─────────────────────────────────────────────────
         counts = Counter(corner_shapes)
-        matched = [s for s, n in counts.items() if n == 2]
-        label = 1 if len(matched) == 1 else 0
+        label = 1 if any(n >= 2 for n in counts.values()) else 0
 
         # ── per-pixel noise ───────────────────────────────────────
         if noise_sigma > 0:
@@ -454,16 +449,15 @@ def _show_samples(n=8, highlight=True, **kwargs):
         axes[0, j].set_title(f"label={lbl}", fontsize=9)
         axes[0, j].axis("off")
 
-        if highlight:
-            # determine which corners form the matching pair
-            counts = Counter(shapes)
-            pair_shape = next((s for s, k in counts.items() if k == 2), None)
-            pair_idx = (
-                {i for i, s in enumerate(shapes) if s == pair_shape}
-                if pair_shape and lbl == 1
-                else set()
-            )
+        counts = Counter(shapes)
+        repeated = {s for s, k in counts.items() if k >= 2}
+        pair_idx = (
+            {i for i, s in enumerate(shapes) if s in repeated}
+            if lbl == 1
+            else set()
+        )
 
+        if highlight:
             # radius of the highlight circle, scaled to image size
             H = img.shape[0]
             r = kwargs.get("shape_radius") or max(3, int(H * 0.008))
@@ -482,7 +476,7 @@ def _show_samples(n=8, highlight=True, **kwargs):
                 )
 
         txt_lines = [
-            f"{i}: {s}{' *' if lbl == 1 and s == pair_shape else ''}"
+            f"{i}: {s}{' *' if i in pair_idx else ''}"
             for i, s in enumerate(shapes)
         ]
         axes[1, j].text(
