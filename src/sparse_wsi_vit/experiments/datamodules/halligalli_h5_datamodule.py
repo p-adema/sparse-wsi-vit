@@ -1,3 +1,5 @@
+import os
+
 import pytorch_lightning as pl
 import torch
 from torch.utils.data import DataLoader
@@ -31,7 +33,7 @@ def _mil_collate_fn(batch: list[dict], corners_only: bool = False) -> dict:
 class HalliGalliH5DataModule(pl.LightningDataModule):
     """Lightning DataModule for pre-extracted HalliGalli Virchow2 features.
 
-    Expects the directory layout produced by extract_halligalli_virchow.py:
+    Expects the directory layout produced by extract_halligalli.py:
 
         data_dir/
             train/features/*.h5  +  train/labels.csv
@@ -63,7 +65,6 @@ class HalliGalliH5DataModule(pl.LightningDataModule):
         self.output_channels = 2
 
     def _make_dataset(self, split: str) -> H5FeatureBagDataset:
-        import os
         split_dir = os.path.join(self.data_dir, split)
         return H5FeatureBagDataset(
             csv_path=os.path.join(split_dir, "labels.csv"),
