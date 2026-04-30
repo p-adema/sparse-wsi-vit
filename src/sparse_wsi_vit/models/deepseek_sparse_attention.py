@@ -6,6 +6,8 @@ Approach B: DeepSeek Sparse Attention (DSA) for WSI slide encoding.
 import torch
 import torch.nn as nn
 from torch import Tensor
+from torch.utils.checkpoint import checkpoint
+
 from sparse_wsi_vit.models.deepseek_sparse_attention_kernels.kernels import (
     LightningIndexerFunction,
     DSAAttentionFunction
@@ -207,8 +209,11 @@ class DSAViTSlideEncoder(nn.Module):
         expansion_factor: float = 4.0,
         attn_dropout: float = 0.0,
         proj_dropout: float = 0.0,
+        gradient_checkpointing: bool = False,
     ) -> None:
         super().__init__()
+
+        self.gradient_checkpointing = gradient_checkpointing
 
         if embed_dim % num_heads != 0:
             raise ValueError(
@@ -283,7 +288,10 @@ class DSAViTSlideEncoder(nn.Module):
         x   = torch.cat([cls, x], dim=1)          # (B, num_cls + patch_len, embed_dim)
 
         for block in self.blocks:
-            x = block(x)
+            if self.gradient_checkpointing and self.training:
+                x = checkpoint(block, x, use_reentrant=False)
+            else:
+                x = block(x)
 
         x = self.norm(x)
 

@@ -31,8 +31,9 @@ OUT_FEATURES = 1  # Binary task
 PRECISION = "bf16-mixed"
 EMBED_DIM = 256
 NUM_HEADS = 4
-NUM_LAYERS = 12
+NUM_LAYERS = 6
 NUM_CLS = 2
+CHECKPOINT_ACTIVATIONS = True
 
 # DSA specific config
 INDEXER_HEADS = 4
@@ -42,11 +43,12 @@ BLOCK_Q = 16
 BLOCK_K = 32
 BLOCK_D = 32    
 
-TRAINING_ITERATIONS = 10_0
+TRAINING_ITERATIONS = 10_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
 LEARNING_RATE = 2e-4
 WEIGHT_DECAY = 1e-4
 GRAD_CLIP = 1.0
+ACCUMULATE_GRAD_STEPS = 10
 
 
 def get_config() -> ExperimentConfig:
@@ -80,6 +82,7 @@ def get_config() -> ExperimentConfig:
         block_d        = BLOCK_D,
         attn_dropout   = 0.0,
         proj_dropout   = 0.0,
+        gradient_checkpointing = CHECKPOINT_ACTIVATIONS,
     )
 
     # Lightning wrapper mappings
@@ -99,6 +102,7 @@ def get_config() -> ExperimentConfig:
         iterations=TRAINING_ITERATIONS,
         grad_clip=GRAD_CLIP,
         precision=PRECISION,
+        accumulate_grad_steps=ACCUMULATE_GRAD_STEPS,
     )
 
     # Scheduler
