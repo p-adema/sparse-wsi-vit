@@ -274,6 +274,8 @@ class DSAViTSlideEncoder(nn.Module):
 
         B = x.shape[0]
 
+        print(f"[forward] slide shape: {x.shape}, T={x.shape[1]}", flush=True)
+
         x = self.input_proj(x)  # (B, patch_len, embed_dim)
 
         # Prepend CLS tokens
