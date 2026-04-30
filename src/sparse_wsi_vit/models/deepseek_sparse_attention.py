@@ -167,7 +167,7 @@ class DSAViTBlock(nn.Module):
 
 
 class DSAViTSlideEncoder(nn.Module):
-    """Slide-level ViT encoder using DeepSeek Native Sparse Attention.
+    """Slide-level ViT encoder using DeepSeek Sparse Attention.
 
     Takes a bag of pre-extracted patch embeddings and produces a slide-level
     classification. Mirrors the API of StaticSparseViTSlideEncoder so the two
