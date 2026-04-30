@@ -61,7 +61,7 @@ def get_config() -> ExperimentConfig:
         train_csv=f"{CSV_BASE}/train.csv",
         val_csv=f"{CSV_BASE}/val.csv",  # Replace with actual val split!
         features_dir=FEATURES_DIR,
-        label_col_name="tmb_binary",  # Changed from 'label' to an actual column present in the CSV
+        label_col_name="label",  # Changed from 'label' to an actual column present in the CSV
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
     )
