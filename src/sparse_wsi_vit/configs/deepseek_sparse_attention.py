@@ -21,7 +21,7 @@ from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDat
 
 # ─── Data Details ──────────────────────────────────────────────
 CSV_BASE   = Path.home() / "splits/tcga-emb/0"
-FEATURES_DIR = Path.home() / "tcga-v2"
+FEATURES_DIR = Path.home() / "tcga-emb"
 
 # ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1  # Standard for MIL bags
