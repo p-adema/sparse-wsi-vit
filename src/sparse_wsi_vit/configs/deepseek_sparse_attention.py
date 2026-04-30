@@ -20,8 +20,8 @@ from sparse_wsi_vit.experiments.lightning_wrappers.mil_wrapper import MILWrapper
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 
 # ─── Data Details ──────────────────────────────────────────────
-CSV_BASE = "~/splits/tcga-emb/0"
-FEATURES_DIR = "~/tcga-emb"
+CSV_BASE   = Path.home() / "splits/tcga-emb/0"
+FEATURES_DIR = Path.home() / "tcga-v2"
 
 # ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1  # Standard for MIL bags
@@ -55,15 +55,13 @@ def get_config() -> ExperimentConfig:
     config.seed = 42
 
     # Dataset: Connects to your H5 extraction
-    config.dataset = LazyConfig(
-        H5FeatureBagDataModule
-    )(
-        train_csv=f"{CSV_BASE}/train.csv",
-        val_csv=f"{CSV_BASE}/val.csv",  # Replace with actual val split!
-        features_dir=FEATURES_DIR,
-        label_col_name="label",  # Changed from 'label' to an actual column present in the CSV
-        batch_size=BATCH_SIZE,
-        num_workers=NUM_WORKERS,
+    config.dataset = LazyConfig(H5FeatureBagDataModule)(
+        train_csv    = str(CSV_BASE / "train.csv"),
+        val_csv      = str(CSV_BASE / "val.csv"),
+        features_dir = str(FEATURES_DIR),
+        label_col_name = "label",
+        batch_size   = BATCH_SIZE,
+        num_workers  = NUM_WORKERS,
     )
 
     # Network: DSAViTSlideEncoder
