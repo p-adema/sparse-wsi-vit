@@ -17,6 +17,13 @@ from sparse_wsi_vit.models.deepseek_sparse_attention_kernels.kernels import (
 # Top-level module
 
 class DeepSeekSparseAttention(nn.Module):
+    """Sparse attention with Multi-Query Attention (MQA) for K and V.
+
+    Q is projected per-head: (B, H, T, head_dim).
+    K and V are projected once and shared across all heads: (B, T, head_dim).
+    This is the MQA mode used by DeepSeek-V3.2, which halves K/V memory
+    bandwidth in the attention kernel and reduces K/V parameter count.
+    """
     def __init__(
         self,
         d_model,
@@ -30,46 +37,54 @@ class DeepSeekSparseAttention(nn.Module):
     ):
         super().__init__()
 
-        self.d_model          = d_model
-        self.attention_heads  = attention_heads
-        self.head_dim         = self.d_model // self.attention_heads
-        self.indexer_heads    = indexer_heads
-        self.indexer_dim      = indexer_dim
-        self.top_k            = top_k
-        self.BLOCK_Q          = BLOCK_Q
-        self.BLOCK_K          = BLOCK_K
-        self.BLOCK_D          = BLOCK_D
-        self.BLOCK_INDEXER_H  = indexer_heads
+        self.d_model           = d_model
+        self.attention_heads   = attention_heads
+        self.head_dim          = self.d_model // self.attention_heads
+        self.indexer_heads     = indexer_heads
+        self.indexer_dim       = indexer_dim
+        self.top_k             = top_k
+        self.BLOCK_Q           = BLOCK_Q
+        self.BLOCK_K           = BLOCK_K
+        self.BLOCK_D           = BLOCK_D
+        self.BLOCK_INDEXER_H   = indexer_heads
         self.BLOCK_ATTENTION_H = attention_heads
 
         self.indexer_head_weights = nn.Parameter(torch.randn(indexer_heads))
         self.indexer_proj = IndexerProjection(d_model, indexer_heads, indexer_dim)
-        self.qkv_proj  = nn.Linear(d_model, 3 * d_model)
-        self.out_proj  = nn.Linear(d_model, d_model)
+
+        # MQA projections:
+        #   q_proj: H separate query heads  → (B, T, H * head_dim)
+        #   kv_proj: ONE shared K and V     → (B, T, 2 * head_dim)
+        # Total params: H*D + 2*head_dim  vs  3*H*D for MHA.
+        # At H=4, head_dim=64, D=256: 1280 vs 3072 — 2.4× fewer KV params.
+        self.q_proj  = nn.Linear(d_model, d_model)               # H * head_dim
+        self.kv_proj = nn.Linear(d_model, 2 * self.head_dim)     # shared K + V
+        self.out_proj = nn.Linear(d_model, d_model)
 
     def forward(self, x):
         B, T, _ = x.shape
         device, dtype = x.device, x.dtype
 
-        qkv = self.qkv_proj(x).reshape(B, T, 3, self.attention_heads, self.head_dim)
-        qkv = qkv.permute(2, 0, 3, 1, 4)
-        q, k, v = qkv.unbind(0)  # each (B, H, T, D)
-        q, k, v = q.contiguous(), k.contiguous(), v.contiguous()
+        # Q: (B, H, T, head_dim)
+        q = self.q_proj(x).reshape(B, T, self.attention_heads, self.head_dim)
+        q = q.permute(0, 2, 1, 3).contiguous()
+
+        # K, V: (B, T, head_dim) — shared across all H heads (MQA)
+        kv = self.kv_proj(x)                                   # (B, T, 2*head_dim)
+        k, v = kv.split(self.head_dim, dim=-1)                 # each (B, T, head_dim)
+        k, v = k.contiguous(), v.contiguous()
 
         q_proj, k_proj = self.indexer_proj(x)  # (B, T, IH, ID)
 
-        # LightningIndexerFunction: forward selects top-k tokens per query,
-        # backward propagates gradients to q_proj, k_proj, indexer_head_weights.
         idx, valid, scores = LightningIndexerFunction.apply(
             q_proj, k_proj, self.indexer_head_weights,
             B, T, self.indexer_heads, self.indexer_dim, self.top_k,
             self.BLOCK_Q, self.BLOCK_K, self.BLOCK_D, self.BLOCK_INDEXER_H,
         )
-        # idx:    (B, T, TOP_K)  int32,  always in [0, T-1]
-        # valid:  (B, T, TOP_K)  float,  1.0 = real slot, 0.0 = unfilled
-        # scores: (B, T, TOP_K)  float,  raw indexer scores (differentiable)
 
-        # This keeps scores in the autograd graph so indexer weights get grads.
+        # Routing weights: raw indexer scores gate each selected token's contribution.
+        # Kept in the autograd graph so gradients flow back to indexer weights.
+        # Scores are already ReLU'd inside the kernel (tl.maximum(..., 0)) so >= 0.
         routing_weights = scores * valid  # (B, T, TOP_K)
 
         o_ptr = torch.zeros(
