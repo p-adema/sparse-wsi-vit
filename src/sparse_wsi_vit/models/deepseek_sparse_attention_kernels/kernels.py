@@ -480,7 +480,8 @@ class LightningIndexerFunction(torch.autograd.Function):
         # Cast to FP8 for the indexer kernel — halves Q/K bandwidth vs BF16.
         # We keep the original BF16 tensors for the backward (gradients need
         # full precision).  The FP8 copies are throwaway.
-        use_fp8 = LightningIndexerFunction._FP8_AVAILABLE
+        # use_fp8 = LightningIndexerFunction._FP8_AVAILABLE
+        use_fp8 = False
         if use_fp8:
             q_fp8 = q_proj.detach().to(LightningIndexerFunction._FP8_DTYPE)
             k_fp8 = k_proj.detach().to(LightningIndexerFunction._FP8_DTYPE)
