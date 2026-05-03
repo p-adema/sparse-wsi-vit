@@ -1,10 +1,10 @@
-"""ABMIL on pre-extracted Virchow2 features from HalliGalli synthetic images.
+"""ViT-5 Dense on pre-extracted Virchow2 features from HalliGalli synthetic images.
 
 Virchow2 (1280-dim CLS token) is used as a frozen patch encoder.
 Features are pre-extracted by extract_halligalli.py.
 
 Usage:
-    uv run experiments/run.py --config src/sparse_wsi_vit/configs/halligalli_abmil.py
+    uv run experiments/run.py --config src/sparse_wsi_vit/configs/halligalli_vit5dense.py
 """
 
 import os
@@ -17,26 +17,27 @@ from sparse_wsi_vit.experiments.default_cfg import (
     WandbConfig,
 )
 from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
-from sparse_wsi_vit.models.abmil import ABMIL
-from sparse_wsi_vit.experiments.lightning_wrappers.mil_wrapper import MILWrapper
+from sparse_wsi_vit.models.vit5_dense import VitDensePreEmbedded
+from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import WSIAttnWrapper
 from sparse_wsi_vit.experiments.datamodules.halligalli_h5_datamodule import HalliGalliH5DataModule
 
 # ─── Data ────────────────────────────────────────────────────────────────────
-DATA_DIR    = os.environ["HALLIGALLI_DATA_DIR"]  # set in job script: export HALLIGALLI_DATA_DIR=/scratch-shared/$USER/halligalli_virchow
-IN_FEATURES = 1280                       # Virchow2 CLS token; use 2560 if --concat_tokens
-OUT_FEATURES = 2                         # binary, CrossEntropy
+DATA_DIR     = os.environ["HALLIGALLI_DATA_DIR"]
+IN_FEATURES  = 1280   # Virchow2 CLS token; use 2560 if --concat_tokens
+OUT_FEATURES = 2      # binary, CrossEntropy
 
 # ─── Optimisation ────────────────────────────────────────────────────────────
 BATCH_SIZE    = 1     # standard for MIL bags
 NUM_WORKERS   = 4
 PRECISION     = "bf16-mixed"
 
+DOWNPROJ                     = 256   # project 1280 → 256 before the transformer
 TRAINING_ITERATIONS          = 5_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
-LEARNING_RATE                = 2e-4
+LEARNING_RATE                = 5e-5
 WEIGHT_DECAY                 = 1e-4
 GRAD_CLIP                    = 1.0
-ACCUMULATE_GRAD_STEPS        = 8     # effective batch size = 8
+ACCUMULATE_GRAD_STEPS        = 8
 
 
 def get_config() -> ExperimentConfig:
@@ -51,15 +52,17 @@ def get_config() -> ExperimentConfig:
         num_workers=NUM_WORKERS,
     )
 
-    config.net = LazyConfig(ABMIL)(
+    config.net = LazyConfig(VitDensePreEmbedded)(
         in_features=IN_FEATURES,
-        hidden_dim=256,
         out_features=OUT_FEATURES,
-        num_branches=1,
+        downproj=DOWNPROJ,
     )
 
-    config.lightning_wrapper_class = LazyConfig(MILWrapper)(
+    config.lightning_wrapper_class = LazyConfig(WSIAttnWrapper)(
         use_bce_loss=(OUT_FEATURES == 1),
+        training_crop_tokens=None,
+        eval_crop_tokens=None,
+        compile_mode=None,
     )
 
     config.optimizer = LazyConfig(torch.optim.AdamW)(
@@ -84,7 +87,7 @@ def get_config() -> ExperimentConfig:
 
     config.wandb = WandbConfig(
         project="wsi-classification",
-        job_group="halligalli_abmil_virchow",
+        job_group="halligalli_vit5dense_easy",
     )
 
     return config

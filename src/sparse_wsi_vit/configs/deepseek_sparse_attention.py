@@ -1,7 +1,7 @@
-"""AB-MIL classification config.
+"""DSA classification config.
 
 Usage:
-    python -m wsi_classification.experiments.run --config configs/baseline_abmil.py
+    python -m sparse-wsi-vit.experiments.run --config configs/deepseek_sparse_attention.py
 """
 
 import torch
@@ -15,28 +15,40 @@ from sparse_wsi_vit.experiments.default_cfg import (
 )
 from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
 
-from sparse_wsi_vit.models.abmil import ABMIL
+from sparse_wsi_vit.models.deepseek_sparse_attention import DSAViTSlideEncoder
 from sparse_wsi_vit.experiments.lightning_wrappers.mil_wrapper import MILWrapper
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 
 # ─── Data Details ──────────────────────────────────────────────
-CSV_BASE = "/media/davidwessels/ananas/data/David-SELECT-AI/csvs/multibiomarker"
-FEATURES_DIR = (
-    "/media/davidwessels/ananas/data/David-SELECT-AI/outputs/virchow_tissue_features"
-)
+CSV_BASE   = Path.home() / "splits/tcga-emb/0"
+FEATURES_DIR = Path.home() / "tcga-emb"
 
 # ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1  # Standard for MIL bags
 NUM_WORKERS = 4
 IN_FEATURES = 1280
-OUT_FEATURES = 1  # Binary tasks
+OUT_FEATURES = 1  # Binary task
 PRECISION = "bf16-mixed"
+EMBED_DIM = 256
+NUM_HEADS = 4
+NUM_LAYERS = 6
+NUM_CLS = 2
+CHECKPOINT_ACTIVATIONS = True
 
-TRAINING_ITERATIONS = 10_000
+# DSA specific config
+INDEXER_HEADS = 4
+INDEXER_DIM = 32
+TOP_K = 128
+BLOCK_Q = 64
+BLOCK_K = 64
+BLOCK_D = 64    
+
+TRAINING_ITERATIONS = 100
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
 LEARNING_RATE = 2e-4
 WEIGHT_DECAY = 1e-4
 GRAD_CLIP = 1.0
+ACCUMULATE_GRAD_STEPS = 8
 
 
 def get_config() -> ExperimentConfig:
@@ -45,23 +57,32 @@ def get_config() -> ExperimentConfig:
     config.seed = 42
 
     # Dataset: Connects to your H5 extraction
-    config.dataset = LazyConfig(
-        H5FeatureBagDataModule
-    )(
-        train_csv=f"{CSV_BASE}/combined_tcga_amc_part1.csv",
-        val_csv=f"{CSV_BASE}/combined_tcga_amc_part1.csv",  # Replace with actual val split!
-        features_dir=FEATURES_DIR,
-        label_col_name="tmb_binary",  # Changed from 'label' to an actual column present in the CSV
-        batch_size=BATCH_SIZE,
-        num_workers=NUM_WORKERS,
+    config.dataset = LazyConfig(H5FeatureBagDataModule)(
+        train_csv    = str(CSV_BASE / "train.csv"),
+        val_csv      = str(CSV_BASE / "val.csv"),
+        features_dir = str(FEATURES_DIR),
+        label_col_name = "label",
+        batch_size   = BATCH_SIZE,
+        num_workers  = NUM_WORKERS,
     )
 
-    # Network: The Standard AB-MIL baseline written natively for 1280-dim CLS tokens
-    config.net = LazyConfig(ABMIL)(
-        in_features=IN_FEATURES,
-        hidden_dim=256,
-        out_features=OUT_FEATURES,
-        num_branches=1,
+    # Network: DSAViTSlideEncoder
+    config.net = LazyConfig(DSAViTSlideEncoder)(
+        in_features    = IN_FEATURES,
+        out_features   = OUT_FEATURES,
+        embed_dim      = EMBED_DIM,
+        num_heads      = NUM_HEADS,
+        num_layers     = NUM_LAYERS,
+        num_cls        = NUM_CLS,
+        indexer_heads  = INDEXER_HEADS,
+        indexer_dim    = INDEXER_DIM,
+        top_k          = TOP_K,
+        block_q        = BLOCK_Q,
+        block_k        = BLOCK_K,
+        block_d        = BLOCK_D,
+        attn_dropout   = 0.0,
+        proj_dropout   = 0.0,
+        gradient_checkpointing = CHECKPOINT_ACTIVATIONS,
     )
 
     # Lightning wrapper mappings
@@ -81,6 +102,7 @@ def get_config() -> ExperimentConfig:
         iterations=TRAINING_ITERATIONS,
         grad_clip=GRAD_CLIP,
         precision=PRECISION,
+        accumulate_grad_steps=ACCUMULATE_GRAD_STEPS,
     )
 
     # Scheduler
@@ -94,8 +116,8 @@ def get_config() -> ExperimentConfig:
     # W&B Logging
     config.wandb = WandbConfig(
         project="wsi-classification",
-        job_group="baseline_abmil",
-        entity="dl2-2026"
+        entity="dl2-2026",
+        job_group="deepseek_sparse_attention",
     )
 
     return config

@@ -1,6 +1,7 @@
 import pytorch_lightning as pl
 import torch
-from torch.utils.data import DataLoader
+import numpy as np
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from sparse_wsi_vit.datasets.h5_slidedataset.h5_dataset import H5FeatureBagDataset
 
@@ -21,21 +22,26 @@ def mil_collate_fn(batch: list[dict]) -> dict:
     assert len(batch) == 1, (
         "Some code assumes batch-size 1. We'd need a more elegant fix than tossing them in a list."
     )
-
-    inputs = [b["input"] for b in batch]
-    labels = torch.stack([b["label"] for b in batch])
-    slide_names = [b["slide_name"] for b in batch]
-    coords = [b["coords"] for b in batch]
-
-    inputs = torch.stack(inputs, dim=0) if len(inputs) == 1 else inputs
-    coords = torch.stack(coords, dim=0) if len(inputs) == 1 else coords
-
-    return {
-        "input": inputs,
-        "label": labels,
-        "slide_name": slide_names,
-        "coords": coords,
+    res = batch[0] | {
+        "input": batch[0]["input"][None],
+        "label": batch[0]["label"][None],
+        "coords": batch[0]["coords"][None],
     }
+    return res
+
+    # This code doesn't actually do anything more useful than the above:
+
+    # inputs = [b["input"] for b in batch]
+    # labels = torch.stack([b["label"] for b in batch])
+    # slide_names = [b["slide_name"] for b in batch]
+    #
+    # inputs = torch.stack(inputs, dim=0) if len(inputs) == 1 else inputs
+    #
+    # return {
+    #     "input": inputs,
+    #     "label": labels,
+    #     "slide_name": slide_names,
+    # }
 
 
 class H5FeatureBagDataModule(pl.LightningDataModule):
@@ -58,6 +64,11 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         label_col_name: str = "label",
         batch_size: int = 1,
         num_workers: int = 4,
+        class_weights: bool = False,
+        worker_prefetch: int | None = None,
+        features_name: str = "features",
+        coords_name: str = "coords",
+        flatten_block: bool = True,
     ):
         super().__init__()
         self.train_csv = train_csv
@@ -68,6 +79,11 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         self.num_workers = num_workers
         self.input_channels = 1280
         self.output_channels = 1
+        self.class_weights = class_weights
+        self.worker_prefetch = worker_prefetch
+        self.features_name = features_name
+        self.coords_name = coords_name
+        self.flatten_block = flatten_block
 
     def setup(self, stage: str | None = None) -> None:
         """Instantiate train and validation datasets.
@@ -80,11 +96,18 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
                 csv_path=self.train_csv,
                 features_dir=self.features_dir,
                 label_col_name=self.label_col_name,
+                class_weights=self.class_weights,
+                features_name=self.features_name,
+                coords_name=self.coords_name,
+                flatten_block=self.flatten_block,
             )
             self.val_dataset = H5FeatureBagDataset(
                 csv_path=self.val_csv,
                 features_dir=self.features_dir,
                 label_col_name=self.label_col_name,
+                features_name=self.features_name,
+                coords_name=self.coords_name,
+                flatten_block=self.flatten_block,
             )
 
     def train_dataloader(self) -> DataLoader:
@@ -96,6 +119,7 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
             num_workers=self.num_workers,
             collate_fn=mil_collate_fn,
             pin_memory=True,
+            prefetch_factor=self.worker_prefetch,
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -107,4 +131,5 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
             num_workers=self.num_workers,
             collate_fn=mil_collate_fn,
             pin_memory=True,
+            prefetch_factor=self.worker_prefetch,
         )

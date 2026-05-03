@@ -1,3 +1,5 @@
+import gc
+
 import torch
 import torchmetrics
 
@@ -84,6 +86,9 @@ class MILWrapper(LightningWrapperBase):
         Returns:
             Scalar training loss.
         """
+        gc.collect()
+        torch.cuda.empty_cache()
+
         loss, _, _ = self._step(batch, self.train_acc)
         self.log(
             "train/loss",
@@ -113,6 +118,9 @@ class MILWrapper(LightningWrapperBase):
         Returns:
             Scalar validation loss.
         """
+        gc.collect()
+        torch.cuda.empty_cache()
+
         loss, _, _ = self._step(batch, self.val_acc)
         self.log(
             "val/loss",

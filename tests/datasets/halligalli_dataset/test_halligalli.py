@@ -1,23 +1,13 @@
-"""Tests for HalliGalliGenerator, HalliGalliDataset, and HalliGalliDataModule."""
+"""Tests for HalliGalliGenerator."""
 
 import numpy as np
-import pytest
-import torch
 from collections import Counter
 
 from sparse_wsi_vit.datasets.halligalli_dataset.halligalli import (
     ALL_SHAPES,
     HalliGalliGenerator,
 )
-from sparse_wsi_vit.experiments.datamodules.halligalli_datamodule import (
-    HalliGalliDataModule,
-    HalliGalliDataset,
-)
 
-
-# ---------------------------------------------------------------------------
-# HalliGalliGenerator.generate_single
-# ---------------------------------------------------------------------------
 
 def test_generate_single_output_types():
     """generate_single returns (ndarray, int, list[str], list[tuple])."""
@@ -49,14 +39,51 @@ def test_generate_single_shapes_from_vocabulary():
     assert all(s in ALL_SHAPES for s in shapes)
 
 
-def test_generate_single_label_exactly_one_pair():
-    """Label is 1 iff exactly one shape type appears exactly twice."""
+def test_generate_single_label_any_pair():
+    """Label is 1 iff any shape type appears more than once."""
     for _ in range(50):
         _, label, shapes, _ = HalliGalliGenerator.generate_single(image_size=32)
         counts = Counter(shapes)
-        pairs = [s for s, n in counts.items() if n == 2]
-        expected = 1 if len(pairs) == 1 else 0
+        expected = 1 if any(n >= 2 for n in counts.values()) else 0
         assert label == expected
+
+
+def test_target_label_0_all_distinct():
+    """target_label=0 always yields four distinct corner shapes."""
+    for _ in range(30):
+        _, label, shapes, _ = HalliGalliGenerator.generate_single(
+            image_size=32, target_label=0
+        )
+        assert label == 0
+        assert len(set(shapes)) == 4, f"Expected 4 distinct shapes, got {shapes}"
+
+
+def test_target_label_1_has_pair():
+    """target_label=1 always yields at least one repeated shape."""
+    for _ in range(30):
+        _, label, shapes, _ = HalliGalliGenerator.generate_single(
+            image_size=32, target_label=1
+        )
+        assert label == 1
+        counts = Counter(shapes)
+        assert any(n >= 2 for n in counts.values()), f"No pair found in {shapes}"
+
+
+def test_shape_radius_parameter():
+    """Custom shape_radius is accepted without error."""
+    img, _, _, _ = HalliGalliGenerator.generate_single(
+        image_size=64, shape_radius=20, target_label=1
+    )
+    assert img.shape == (64, 64, 3)
+
+
+def test_confounders_per_key_zero():
+    """confounders_per_key=0 runs without error."""
+    img, label, shapes, _ = HalliGalliGenerator.generate_single(
+        image_size=64, confounders_per_key=0, target_label=0
+    )
+    assert img.shape == (64, 64, 3)
+    assert label == 0
 
 
 def test_generate_single_separation_affects_positions():
@@ -73,105 +100,3 @@ def test_generate_single_separation_affects_positions():
 
     assert spread(0.9) > spread(0.3)
 
-
-# ---------------------------------------------------------------------------
-# HalliGalliDataset
-# ---------------------------------------------------------------------------
-
-def test_dataset_len():
-    """__len__ returns the length passed at construction."""
-    ds = HalliGalliDataset(length=17, image_size=32, patch_size=16)
-    assert len(ds) == 17
-
-
-def test_dataset_item_keys():
-    """Each item has 'input' and 'label' keys."""
-    ds = HalliGalliDataset(length=1, image_size=32, patch_size=16)
-    sample = ds[0]
-    assert "input" in sample
-    assert "label" in sample
-
-
-def test_dataset_bag_shape():
-    """Bag shape is (N, D) where N=(image_size//patch_size)^2, D=3*patch_size^2."""
-    image_size, patch_size = 64, 16
-    ds = HalliGalliDataset(length=1, image_size=image_size, patch_size=patch_size)
-    bag = ds[0]["input"]
-    expected_N = (image_size // patch_size) ** 2
-    expected_D = 3 * patch_size ** 2
-    assert bag.shape == (expected_N, expected_D)
-
-
-def test_dataset_label_dtype_and_range():
-    """Label is an int64 tensor with value 0 or 1."""
-    ds = HalliGalliDataset(length=20, image_size=32, patch_size=16)
-    for i in range(20):
-        label = ds[i]["label"]
-        assert label.dtype == torch.int64
-        assert label.item() in (0, 1)
-
-
-def test_dataset_invalid_patch_size_raises():
-    """HalliGalliDataModule raises when patch_size does not divide image_size."""
-    with pytest.raises(ValueError):
-        HalliGalliDataModule(image_size=64, patch_size=12)
-
-
-# ---------------------------------------------------------------------------
-# HalliGalliDataModule
-# ---------------------------------------------------------------------------
-
-def test_datamodule_channels():
-    """input_channels and output_channels are derived from patch_size."""
-    dm = HalliGalliDataModule(image_size=64, patch_size=16)
-    assert dm.input_channels == 3 * 16 ** 2   # 768
-    assert dm.output_channels == 2
-
-
-def test_datamodule_setup_creates_datasets():
-    """setup() populates train, val, and test datasets with correct lengths."""
-    dm = HalliGalliDataModule(
-        train_size=10, val_size=4, test_size=4,
-        image_size=32, patch_size=16,
-    )
-    dm.setup()
-    assert len(dm.train_dataset) == 10
-    assert len(dm.val_dataset) == 4
-    assert len(dm.test_dataset) == 4
-
-
-def test_datamodule_dataloader_batch_shape():
-    """DataLoader yields batches of shape (B, N, D) with correct label shape."""
-    dm = HalliGalliDataModule(
-        train_size=8, val_size=4, test_size=4,
-        batch_size=4, num_workers=0,
-        image_size=32, patch_size=16,
-    )
-    dm.setup()
-    batch = next(iter(dm.train_dataloader()))
-    B, N, D = batch["input"].shape
-    assert B == 4
-    assert N == (32 // 16) ** 2
-    assert D == 3 * 16 ** 2
-    assert batch["label"].shape == (4,)
-
-
-def test_datamodule_abmil_forward():
-    """Bags from the DataModule pass through ABMIL without error."""
-    from sparse_wsi_vit.models.abmil import ABMIL
-
-    dm = HalliGalliDataModule(
-        train_size=4, val_size=2, test_size=2,
-        batch_size=4, num_workers=0,
-        image_size=32, patch_size=16,
-    )
-    dm.setup()
-    batch = next(iter(dm.train_dataloader()))
-
-    model = ABMIL(in_features=dm.input_channels, hidden_dim=32, out_features=2)
-    model.eval()
-    with torch.no_grad():
-        out = model(batch["input"], return_attention=True)
-
-    assert out["logits"].shape == (4, 2)
-    assert out["attention"].shape == (4, 1, (32 // 16) ** 2)
