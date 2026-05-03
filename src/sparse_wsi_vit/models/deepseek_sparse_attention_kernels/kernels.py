@@ -12,53 +12,9 @@ import torch.nn as nn
 import math
 
 
-# ---------------------------------------------------------------------------
-# Indexer forward kernel helpers — shared top-K merge logic
-# ---------------------------------------------------------------------------
-
-@triton.jit
-def _topk_merge_and_store(
-    block_scores, offs_k, mask_k, T,
-    topk_scores, topk_indices,
-    BLOCK_Q: tl.constexpr, BLOCK_K: tl.constexpr, TOP_K: tl.constexpr,
-):
-    """Merge a (BLOCK_Q, BLOCK_K) score block into the running top-K buffer."""
-    block_scores = tl.maximum(block_scores, 0.0)
-    block_scores = tl.where(mask_k[None, :], block_scores, float("-inf"))
-
-    for i in range(BLOCK_K):
-        col_mask = tl.arange(0, BLOCK_K) == i
-
-        candidate_score = tl.sum(
-            tl.where(col_mask[None, :], block_scores, 0.0), axis=1
-        )
-        candidate_idx = tl.minimum(
-            tl.sum(tl.where(col_mask, offs_k, 0)), T - 1
-        )
-
-        min_score     = tl.min(topk_scores, axis=1)
-        raw_is_min    = topk_scores == min_score[:, None]
-        cumsum        = tl.cumsum(raw_is_min.to(tl.int32), axis=1)
-        slot_is_min   = raw_is_min & (cumsum == 1)
-        should_insert = candidate_score > min_score
-
-        topk_scores = tl.where(
-            should_insert[:, None] & slot_is_min,
-            candidate_score[:, None], topk_scores,
-        )
-        topk_indices = tl.where(
-            should_insert[:, None] & slot_is_min,
-            candidate_idx, topk_indices,
-        )
-
-    return topk_scores, topk_indices
-
-
-# ---------------------------------------------------------------------------
-# Indexer forward kernel — BF16 / FP32 path (original)
+# Indexer forward kernel
 # Computes weighted dot-product scores, runs top-k selection.
 # Writes IDX (int), VALID (float), SCORES (float).
-# ---------------------------------------------------------------------------
 
 @triton.jit
 def _indexer_fwd(
@@ -111,13 +67,37 @@ def _indexer_fwd(
             Wk = tl.sum(K * W[None, :, None], axis=1)  # (BLOCK_K, BLOCK_D)
             block_scores += tl.dot(Wq, tl.trans(Wk))   # (BLOCK_Q, BLOCK_K)
 
-        topk_scores, topk_indices = _topk_merge_and_store(
-            block_scores, offs_k, mask_k, T,
-            topk_scores, topk_indices,
-            BLOCK_Q, BLOCK_K, TOP_K,
-        )
+        block_scores = tl.maximum(block_scores, 0.0)
+        block_scores = tl.where(mask_k[None, :], block_scores, float("-inf"))
+
+        # Merge into running top-K buffer via column-mask + cumsum tie-break
+        for i in range(BLOCK_K):
+            col_mask = tl.arange(0, BLOCK_K) == i
+
+            candidate_score = tl.sum(
+                tl.where(col_mask[None, :], block_scores, 0.0), axis=1
+            )  # (BLOCK_Q,)
+            candidate_idx = tl.minimum(
+                tl.sum(tl.where(col_mask, offs_k, 0)), T - 1
+            )  # scalar, always in [0, T-1]
+
+            min_score   = tl.min(topk_scores, axis=1)
+            raw_is_min  = topk_scores == min_score[:, None]
+            cumsum      = tl.cumsum(raw_is_min.to(tl.int32), axis=1)
+            slot_is_min = raw_is_min & (cumsum == 1)
+            should_insert = candidate_score > min_score
+
+            topk_scores = tl.where(
+                should_insert[:, None] & slot_is_min,
+                candidate_score[:, None], topk_scores,
+            )
+            topk_indices = tl.where(
+                should_insert[:, None] & slot_is_min,
+                candidate_idx, topk_indices,
+            )
 
     slot_offs = tl.arange(0, TOP_K)
+
     tl.store(
         IDX_ptr + pid_b*sib + offs_t[:, None]*sit + slot_offs[None, :]*sik,
         topk_indices, mask=mask_t[:, None],
@@ -133,99 +113,6 @@ def _indexer_fwd(
     )
 
 
-# ---------------------------------------------------------------------------
-# Indexer forward kernel — FP8 path
-#
-# Q and K are passed as FP8 (float8_e4m3fn).  We load them and immediately
-# upcast to FP32 before any arithmetic — accumulation is always FP32.
-# This halves memory bandwidth for Q/K loads vs BF16, ~4× vs FP32.
-#
-# On A100: no native FP8 tensor cores, but bandwidth savings still apply.
-# On H100: FP8 tensor cores fire for tl.dot, giving additional speedup.
-#
-# The backward stays in BF16/FP32 (gradients must be full precision).
-# We save the original BF16 q_proj/k_proj for the backward, not the FP8 copy.
-# ---------------------------------------------------------------------------
-
-@triton.jit
-def _indexer_fwd_fp8(
-    Q_ptr, K_ptr, IDX_ptr, VALID_ptr, SCORES_ptr, W_ptr,
-    sqb, sqt, sqh, sqd,
-    skb, skt, skh, skd,
-    sib, sit, sik,
-    svlb, svlt, svlk,
-    ssb, sst, ssk,
-    B, T, H, D,
-    TOP_K:           tl.constexpr,
-    BLOCK_Q:         tl.constexpr,
-    BLOCK_K:         tl.constexpr,
-    BLOCK_INDEXER_H: tl.constexpr,
-    BLOCK_D:         tl.constexpr,
-):
-    pid_b  = tl.program_id(0)
-    pid_t  = tl.program_id(1)
-    offs_t = pid_t * BLOCK_Q + tl.arange(0, BLOCK_Q)
-    offs_h = tl.arange(0, BLOCK_INDEXER_H)
-    mask_t = offs_t < T
-
-    # W stays FP32 — it's tiny (H scalars) and not bandwidth-bound
-    W = tl.load(W_ptr + offs_h)  # (H,) fp32
-
-    topk_scores  = tl.full((BLOCK_Q, TOP_K), float("-inf"), dtype=tl.float32)
-    topk_indices = tl.full((BLOCK_Q, TOP_K), 0,            dtype=tl.int32)
-
-    for k_block in range(0, tl.cdiv(T, BLOCK_K)):
-        offs_k = k_block * BLOCK_K + tl.arange(0, BLOCK_K)
-        mask_k = offs_k < T
-
-        block_scores = tl.zeros((BLOCK_Q, BLOCK_K), dtype=tl.float32)
-
-        for d_block in range(0, tl.cdiv(D, BLOCK_D)):
-            offs_d = d_block * BLOCK_D + tl.arange(0, BLOCK_D)
-            mask_d = offs_d < D
-
-            # Load FP8, upcast to FP32 immediately for safe arithmetic
-            Q_fp8 = tl.load(
-                Q_ptr + pid_b*sqb + offs_t[:, None, None]*sqt
-                      + offs_h[None, :, None]*sqh + offs_d[None, None, :]*sqd,
-                mask=mask_t[:, None, None] & mask_d[None, None, :], other=0.0,
-            )  # (BLOCK_Q, H, BLOCK_D) fp8
-            Q = Q_fp8.to(tl.float32)
-
-            K_fp8 = tl.load(
-                K_ptr + pid_b*skb + offs_k[:, None, None]*skt
-                      + offs_h[None, :, None]*skh + offs_d[None, None, :]*skd,
-                mask=mask_k[:, None, None] & mask_d[None, None, :], other=0.0,
-            )  # (BLOCK_K, H, BLOCK_D) fp8
-            K = K_fp8.to(tl.float32)
-
-            Wq = tl.sum(Q * W[None, :, None], axis=1)  # (BLOCK_Q, BLOCK_D)
-            Wk = tl.sum(K * W[None, :, None], axis=1)  # (BLOCK_K, BLOCK_D)
-            block_scores += tl.dot(Wq, tl.trans(Wk))   # (BLOCK_Q, BLOCK_K) fp32
-
-        topk_scores, topk_indices = _topk_merge_and_store(
-            block_scores, offs_k, mask_k, T,
-            topk_scores, topk_indices,
-            BLOCK_Q, BLOCK_K, TOP_K,
-        )
-
-    slot_offs = tl.arange(0, TOP_K)
-    tl.store(
-        IDX_ptr + pid_b*sib + offs_t[:, None]*sit + slot_offs[None, :]*sik,
-        topk_indices, mask=mask_t[:, None],
-    )
-    tl.store(
-        VALID_ptr + pid_b*svlb + offs_t[:, None]*svlt + slot_offs[None, :]*svlk,
-        (topk_scores > float("-inf")).to(tl.float32), mask=mask_t[:, None],
-    )
-    tl.store(
-        SCORES_ptr + pid_b*ssb + offs_t[:, None]*sst + slot_offs[None, :]*ssk,
-        tl.where(topk_scores > float("-inf"), topk_scores, 0.0),
-        mask=mask_t[:, None],
-    )
-
-
-# ---------------------------------------------------------------------------
 # Indexer backward kernels
 #
 # Forward:  score[b,q,k] = sum_h W[h] * sum_d Q[b,q,h,d] * K[b,k,h,d]
@@ -237,7 +124,6 @@ def _indexer_fwd_fp8(
 # dQ[b,q,h,d] += sum_{slot} dScore[b,q,slot] * W[h] * K[b, idx[b,q,slot], h, d]
 # dK[b,k,h,d] += sum_{q,slot: idx[b,q,slot]==k} dScore[b,q,slot] * W[h] * Q[b,q,h,d]
 # dW[h]        = sum_{b,q,slot} dScore[b,q,slot] * sum_d Q[b,q,h,d]*K[b,idx[..],h,d]
-# ---------------------------------------------------------------------------
 
 @triton.jit
 def _indexer_bwd_dQ(
@@ -453,16 +339,9 @@ def _indexer_bwd_dW(
         tl.atomic_add(dW_ptr + h, tl.sum(dW_h_acc))
 
 
-# ---------------------------------------------------------------------------
 # LightningIndexerFunction — manual autograd.Function
-# ---------------------------------------------------------------------------
 
 class LightningIndexerFunction(torch.autograd.Function):
-
-    # FP8 is supported on Ampere (A100) and later for bandwidth savings.
-    # H100 additionally has native FP8 tensor cores for extra compute speedup.
-    _FP8_DTYPE     = torch.float8_e4m3fn
-    _FP8_AVAILABLE = hasattr(torch, "float8_e4m3fn")
 
     @staticmethod
     def forward(
@@ -477,30 +356,16 @@ class LightningIndexerFunction(torch.autograd.Function):
         valid_ptr  = torch.zeros((B, T, TOP_K), device=device, dtype=torch.float32)
         scores_ptr = torch.zeros((B, T, TOP_K), device=device, dtype=torch.float32)
 
-        # Cast to FP8 for the indexer kernel — halves Q/K bandwidth vs BF16.
-        # We keep the original BF16 tensors for the backward (gradients need
-        # full precision).  The FP8 copies are throwaway.
-        # use_fp8 = LightningIndexerFunction._FP8_AVAILABLE
-        use_fp8 = False
-        if use_fp8:
-            q_fp8 = q_proj.detach().to(LightningIndexerFunction._FP8_DTYPE)
-            k_fp8 = k_proj.detach().to(LightningIndexerFunction._FP8_DTYPE)
-            sqb, sqt, sqh, sqd = q_fp8.stride()
-            skb, skt, skh, skd = k_fp8.stride()
-        else:
-            q_fp8, k_fp8 = q_proj, k_proj
-            sqb, sqt, sqh, sqd = q_proj.stride()
-            skb, skt, skh, skd = k_proj.stride()
+        sqb, sqt, sqh, sqd = q_proj.stride()
+        skb, skt, skh, skd = k_proj.stride()
+        sib, sit, sik       = idx_ptr.stride()
+        svlb, svlt, svlk    = valid_ptr.stride()
+        ssb, sst, ssk       = scores_ptr.stride()
 
-        sib, sit, sik    = idx_ptr.stride()
-        svlb, svlt, svlk = valid_ptr.stride()
-        ssb, sst, ssk    = scores_ptr.stride()
+        grid = (B, math.ceil(T / BLOCK_Q))
 
-        grid   = (B, math.ceil(T / BLOCK_Q))
-        kernel = _indexer_fwd_fp8 if use_fp8 else _indexer_fwd
-
-        kernel[grid](
-            q_fp8, k_fp8, idx_ptr, valid_ptr, scores_ptr, W,
+        _indexer_fwd[grid](
+            q_proj, k_proj, idx_ptr, valid_ptr, scores_ptr, W,
             sqb, sqt, sqh, sqd,
             skb, skt, skh, skd,
             sib, sit, sik,
@@ -510,12 +375,11 @@ class LightningIndexerFunction(torch.autograd.Function):
             TOP_K, BLOCK_Q, BLOCK_K, BLOCK_INDEXER_H, BLOCK_D,
         )
 
-        # Save original precision tensors for backward — NOT the FP8 copies
         ctx.save_for_backward(q_proj, k_proj, W, idx_ptr, valid_ptr)
-        ctx.dims        = (B, T, H, D, TOP_K)
-        ctx.blocks      = (BLOCK_Q, BLOCK_K, BLOCK_D, BLOCK_INDEXER_H)
-        ctx.strides_q   = q_proj.stride()
-        ctx.strides_k   = k_proj.stride()
+        ctx.dims   = (B, T, H, D, TOP_K)
+        ctx.blocks = (BLOCK_Q, BLOCK_K, BLOCK_D, BLOCK_INDEXER_H)
+        ctx.strides_q   = (sqb, sqt, sqh, sqd)
+        ctx.strides_k   = (skb, skt, skh, skd)
         ctx.strides_idx = (sib, sit, sik)
         ctx.strides_vld = (svlb, svlt, svlk)
 
@@ -579,7 +443,6 @@ class LightningIndexerFunction(torch.autograd.Function):
         # Return grads aligned with forward args:
         # q_proj, k_proj, W,  B, T, H, D, TOP_K,  BLOCK_Q, BLOCK_K, BLOCK_D, BLOCK_INDEXER_H
         return dQ, dK, dW, None, None, None, None, None, None, None, None, None
-
 
 # ---------------------------------------------------------------------------
 # Attention forward kernel — MQA version
