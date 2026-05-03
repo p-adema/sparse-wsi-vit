@@ -22,7 +22,7 @@ class StaticSparseAttention(nn.Module):
     Args:
         embed_dim: Total embedding dimension.
         num_heads: Number of attention heads.
-        num_cls: Number of global CLS tokens at the front of the sequence.
+        num_cls: Number of global CLS tokens at the front of the sequence. (num_cls + patch_len >= 8 for MMA)
         window_size: One-sided local window radius for patch-to-patch attention.
             Patch i attends to patches [i-W, i+W].
             Set to 0 to disable local patch attention (CLS-only).
@@ -167,14 +167,23 @@ class StaticSparseAttention(nn.Module):
         cls_mask = torch.zeros(patch_len, num_cls, device=q_patch.device, dtype=q_patch.dtype)
         attn_mask = torch.cat([cls_mask, window_mask], dim=1)  # (patch_len, context_len)
 
-        flat = B * num_heads * patch_len
+        # Block-diagonal mask: patch i attends only to columns [i*context_len : (i+1)*context_len].
+        # This keeps patch_len as the query sequence dimension, enabling MMA (requires seq_len >= 8).
+        col_idx = (
+            torch.arange(patch_len, device=q_patch.device)[:, None] * context_len
+            + torch.arange(context_len, device=q_patch.device)[None, :]
+        )  # (patch_len, context_len)
+        block_mask = q_patch.new_full((patch_len, patch_len * context_len), float("-inf"))
+        block_mask.scatter_(1, col_idx, attn_mask)
+
+        flat = B * num_heads
         out = F.scaled_dot_product_attention(
-            q_patch.reshape(flat, 1, head_dim),
-            k_context.reshape(flat, context_len, head_dim),
-            v_context.reshape(flat, context_len, head_dim),
-            attn_mask=attn_mask.expand(B, num_heads, -1, -1).reshape(flat, 1, context_len),
+            q_patch.reshape(flat, patch_len, head_dim),
+            k_context.reshape(flat, patch_len * context_len, head_dim),
+            v_context.reshape(flat, patch_len * context_len, head_dim),
+            attn_mask=block_mask,  # (patch_len, patch_len*context_len) broadcasts over flat
             dropout_p=dropout_p,
-        )  # (flat, 1, head_dim)
+        )      # (flat, patch_len, head_dim)
 
         return out.reshape(B, num_heads, patch_len, head_dim)
 
