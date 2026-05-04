@@ -310,11 +310,12 @@ class StaticSparseViTSlideEncoder(nn.Module):
         nn.init.zeros_(self.input_proj.bias)
         nn.init.zeros_(self.head.bias)
 
-    def forward(self, x: Tensor) -> dict[str, Tensor]:
+    def forward(self, x: Tensor, coords: Tensor | None = None) -> dict[str, Tensor]:
         """Encode a bag of patch embeddings and return slide-level logits.
 
         Args:
             x: Patch embeddings of shape ``(B, patch_len, in_features)``.
+            coords: coordinates of the patch embedding.
 
         Returns:
             Dict with ``"logits"`` of shape ``(B, out_features)``.
