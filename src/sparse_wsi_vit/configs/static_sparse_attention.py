@@ -20,9 +20,8 @@ from sparse_wsi_vit.experiments.lightning_wrappers.mil_wrapper import MILWrapper
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 
 # ─── Data Details ──────────────────────────────────────────────
-CSV_BASE = "../splits/tcga-emb/4"
-FEATURES_DIR = "../tcga-v2/"
-
+CSV_BASE   = Path.home() / "splits/tcga-emb/0"
+FEATURES_DIR = Path.home() / "tcga-v2"
 # ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1  # Standard for MIL bags
 NUM_WORKERS = 4
@@ -55,7 +54,7 @@ def get_config() -> ExperimentConfig:
         train_csv=f"{CSV_BASE}/train.csv",
         val_csv=f"{CSV_BASE}/val.csv",  # Replace with actual val split!
         features_dir=FEATURES_DIR,
-        label_col_name="tmb_binary",  # Changed from 'label' to an actual column present in the CSV
+        label_col_name="label",  # Changed from 'label' to an actual column present in the CSV
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
     )

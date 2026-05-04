@@ -74,6 +74,10 @@ class H5FeatureBagDataset(Dataset):
                         "h5_path": h5_path,
                     }
                 )
+            else:
+                print(f"{h5_path=}")
+                print(f"{raw_label=}")
+        print(f"{label_counts=}")
         per_cls = len(valid_slides) / len(label_counts)  # N / |C|
         if self.class_weights:
             for slide in valid_slides:
