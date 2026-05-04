@@ -1,4 +1,4 @@
-"""AB-MIL classification config.
+"""Static Sparse Attention classification config.
 
 Usage:
     python -m sparse-wsi-vit.experiments.run --config configs/static_sparse_attention_config.py
@@ -16,31 +16,32 @@ from sparse_wsi_vit.experiments.default_cfg import (
 from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
 
 from sparse_wsi_vit.models.static_sparse_attention import StaticSparseViTSlideEncoder
-from sparse_wsi_vit.experiments.lightning_wrappers.mil_wrapper import MILWrapper
+from sparse_wsi_vit.experiments.lightning_wrappers.mil_wrapper import WSIAttnWrapper
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 
 # ─── Data Details ──────────────────────────────────────────────
-CSV_BASE = "../splits/tcga-emb/4"
+CSV_BASE = "../splits/tcga-tmb/4"
 FEATURES_DIR = "../tcga-v2/"
-
 # ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1  # Standard for MIL bags
 NUM_WORKERS = 4
 IN_FEATURES = 1280
 OUT_FEATURES = 1  # Binary task
 PRECISION = "bf16-mixed"
-EMBED_DIM = 256
-NUM_HEADS = 4
-NUM_LAYERS = 4
+EMBED_DIM = 64
+NUM_HEADS = 1
+NUM_LAYERS = 1
 NUM_CLS = 2
 WINDOW_SIZE = 3
 DILATION = 1
+WORKER_PREFETCH = 10
+CLASS_WEIGHTS = True
 
-TRAINING_ITERATIONS = 10_0
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
 LEARNING_RATE = 2e-4
 WEIGHT_DECAY = 1e-4
 GRAD_CLIP = 1.0
+ACCUMULATE_GRAD_STEPS = 10
 
 
 def get_config() -> ExperimentConfig:
@@ -49,15 +50,17 @@ def get_config() -> ExperimentConfig:
     config.seed = 42
 
     # Dataset: Connects to your H5 extraction
-    config.dataset = LazyConfig(
-        H5FeatureBagDataModule
-    )(
+    config.dataset = LazyConfig(H5FeatureBagDataModule)(
         train_csv=f"{CSV_BASE}/train.csv",
-        val_csv=f"{CSV_BASE}/val.csv",  # Replace with actual val split!
+        val_csv=f"{CSV_BASE}/val.csv",
         features_dir=FEATURES_DIR,
-        label_col_name="tmb_binary",  # Changed from 'label' to an actual column present in the CSV
+        label_col_name="label",
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
+        class_weights=CLASS_WEIGHTS,
+        worker_prefetch=WORKER_PREFETCH,
+        features_name="cls_224x224",  # low resolution!
+        coords_name="coords_224x224",
     )
 
     # Network: StaticSparseViTSlideEncoder
@@ -75,9 +78,13 @@ def get_config() -> ExperimentConfig:
     )
 
     # Lightning wrapper mappings
-    config.lightning_wrapper_class = LazyConfig(MILWrapper)(
-        use_bce_loss=(OUT_FEATURES == 1)
+    config.lightning_wrapper_class = LazyConfig(WSIAttnWrapper)(
+        use_bce_loss=(OUT_FEATURES == 1),
+        training_crop_tokens=None,
+        eval_crop_tokens=None,
+        compile_mode="max-autotune-no-cudagraphs",
     )
+
 
     # Optimizer
     config.optimizer = LazyConfig(torch.optim.AdamW)(
@@ -91,6 +98,7 @@ def get_config() -> ExperimentConfig:
         iterations=TRAINING_ITERATIONS,
         grad_clip=GRAD_CLIP,
         precision=PRECISION,
+        accumulate_grad_steps=ACCUMULATE_GRAD_STEPS,
     )
 
     # Scheduler
@@ -105,6 +113,7 @@ def get_config() -> ExperimentConfig:
     config.wandb = WandbConfig(
         project="wsi-classification",
         job_group="static_sparse_attention",
+        entity="dl2-2026"
     )
 
     return config
