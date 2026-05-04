@@ -20,7 +20,7 @@ from sparse_wsi_vit.experiments.lightning_wrappers.mil_wrapper import MILWrapper
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 
 # ─── Data Details ──────────────────────────────────────────────
-CSV_BASE = "../splits/tcga-tmb/0"
+CSV_BASE = "../splits/tcga-emb/4"
 FEATURES_DIR = "../tcga-v2/"
 
 # ─── Hyperparameters ─────────────────────────────────────────────
