@@ -24,10 +24,10 @@ FEATURES_DIR = "/scratch-shared/scur0097/camelyon-emb"
 
 # ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1  # Standard for MIL bags
-NUM_WORKERS = 4
+NUM_WORKERS = 0
 IN_FEATURES = 1280
 OUT_FEATURES = 2 
-PRECISION = "bf16-mixed"
+PRECISION = "32-true"
 
 TRAINING_ITERATIONS = 10_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
