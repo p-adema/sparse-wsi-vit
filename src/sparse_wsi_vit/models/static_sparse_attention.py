@@ -7,6 +7,71 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
+def _rotate_half(x: Tensor) -> Tensor:
+    """Rotate adjacent pairs: [..., x1, x2, ...] → [..., -x2, x1, ...]."""
+    x1 = x[..., 0::2]
+    x2 = x[..., 1::2]
+    return torch.stack([-x2, x1], dim=-1).flatten(-2)
+
+
+class Rope2D(nn.Module):
+    """2-D Rotary Position Embedding for patch tokens.
+
+    Applies 1-D RoPE independently along the x and y coordinate axes.
+    ``head_dim`` is split evenly: the first half encodes x, the second
+    half encodes y.
+
+    Args:
+        head_dim: Per-head feature dimension. Must be divisible by 4.
+        theta: RoPE base frequency.
+        coord_high: Coordinate normalisation divisor.  Raw pixel coords
+            are divided by this value before computing frequencies.
+            Default: 100_000 — matches ViT-5 ``rope_dynamic_high`` and
+            is suitable for WSI pixel-level coordinates.
+    """
+
+    def __init__(
+        self,
+        head_dim: int,
+        theta: float = 10_000.0,
+        coord_high: float = 100_000.0,
+    ) -> None:
+        super().__init__()
+        if head_dim % 4 != 0:
+            raise ValueError(
+                f"head_dim must be divisible by 4 for 2D RoPE, got {head_dim}"
+            )
+        half = head_dim // 2
+        inv_freq = 1.0 / (theta ** (torch.arange(0, half, 2).float() / half))
+        self.register_buffer("inv_freq", inv_freq)  # (half // 2,)
+        self.coord_high = coord_high
+
+    def forward(self, x: Tensor, coords: Tensor) -> Tensor:
+        """Rotate Q or K using 2-D spatial coordinates.
+
+        Args:
+            x: ``(B, num_heads, L, head_dim)`` — patch queries or keys.
+            coords: ``(B, L, 2)`` — (x, y) pixel coordinates for each patch.
+
+        Returns:
+            Rotated tensor, same shape as ``x``.
+        """
+        xy = coords.float() / self.coord_high  # (B, L, 2)
+
+        # Per-token frequency vectors for each axis: (B, L, half//2)
+        freq_x = torch.einsum("bl, f -> blf", xy[..., 0], self.inv_freq)
+        freq_y = torch.einsum("bl, f -> blf", xy[..., 1], self.inv_freq)
+
+        # Repeat each freq to align with rotate_half on adjacent pairs
+        freq_x = freq_x.repeat_interleave(2, dim=-1)  # (B, L, half)
+        freq_y = freq_y.repeat_interleave(2, dim=-1)  # (B, L, half)
+
+        freqs = torch.cat([freq_x, freq_y], dim=-1)   # (B, L, head_dim)
+        cos = freqs.cos().unsqueeze(1)  # (B, 1, L, head_dim)
+        sin = freqs.sin().unsqueeze(1)
+
+        return x * cos + _rotate_half(x) * sin
+
 
 class StaticSparseAttention(nn.Module):
     """Longformer-style static sparse attention with optional local window.
@@ -31,6 +96,13 @@ class StaticSparseAttention(nn.Module):
             ``dilation=d`` attends to every d-th patch, covering a span of
             ``2 * window_size * dilation`` at the same key-count cost.
         attn_dropout: Dropout probability on attention weights.
+        chunk_size: Number of patch queries to process per SDPA call in the windowed
+            path. Each call uses a block-diagonal mask of shape
+            ``(chunk_size, chunk_size * context_len)``, keeping the query sequence long enough for
+            Flash Attention / MMA (requires chunk_size >= 8).
+        rope_theta: Base frequency for :class:`Rope2D`. Default: 10_000.
+        rope_coord_high: Coordinate normalisation divisor for :class:`Rope2D`.
+            Raw pixel coordinates are divided by this value. Default: 100_000.
     """
 
     def __init__(
@@ -41,6 +113,9 @@ class StaticSparseAttention(nn.Module):
         window_size: int = 0,
         dilation: int = 1,
         attn_dropout: float = 0.0,
+        chunk_size: int = 512,
+        rope_theta: float = 10_000.0,
+        rope_coord_high: float = 100_000.0,
     ) -> None:
         super().__init__()
         if embed_dim % num_heads != 0:
@@ -54,17 +129,21 @@ class StaticSparseAttention(nn.Module):
         self.window_size = window_size
         self.dilation = dilation
         self.head_dim = embed_dim // num_heads
+        self.chunk_size = chunk_size
 
+        self.rope = Rope2D(self.head_dim, theta=rope_theta, coord_high=rope_coord_high)
         self.qkv = nn.Linear(embed_dim, 3 * embed_dim, bias=True)
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=True)
         self.attn_dropout = attn_dropout
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, coords: Tensor | None = None) -> Tensor:
         """Static sparse attention.
 
         Args:
             x: Token sequence ``(B, num_cls + patch_len, embed_dim)``,
                CLS tokens prepended.
+            coords: Patch pixel coordinates ``(B, patch_len, 2)``.
+               When provided, 2-D RoPE is applied to patch Q and K.
 
         Returns:
             Output of shape ``(B, num_cls + patch_len, embed_dim)``.
@@ -80,8 +159,13 @@ class StaticSparseAttention(nn.Module):
         q_cls,   k_cls,   v_cls = q[:, :, :num_cls],  k[:, :, :num_cls],  v[:, :, :num_cls]
         q_patch, k_patch, v_patch = q[:, :, num_cls:],  k[:, :, num_cls:],  v[:, :, num_cls:]
 
-        dropout_p = self.attn_dropout if self.training else 0.0
+        # Apply 2-D RoPE to patch Q and K
+        if coords is not None:
+            q_patch = self.rope(q_patch, coords)
+            k_patch = self.rope(k_patch, coords)
+            k = torch.cat([k_cls, k_patch], dim=2)
 
+        dropout_p = self.attn_dropout if self.training else 0.0
 
         # CLS tokens: global attention over the full sequence
         cls_out = F.scaled_dot_product_attention(
@@ -167,25 +251,39 @@ class StaticSparseAttention(nn.Module):
         cls_mask = torch.zeros(patch_len, num_cls, device=q_patch.device, dtype=q_patch.dtype)
         attn_mask = torch.cat([cls_mask, window_mask], dim=1)  # (patch_len, context_len)
 
-        # Block-diagonal mask: patch i attends only to columns [i*context_len : (i+1)*context_len].
-        # This keeps patch_len as the query sequence dimension, enabling MMA (requires seq_len >= 8).
-        col_idx = (
-            torch.arange(patch_len, device=q_patch.device)[:, None] * context_len
-            + torch.arange(context_len, device=q_patch.device)[None, :]
-        )  # (patch_len, context_len)
-        block_mask = q_patch.new_full((patch_len, patch_len * context_len), float("-inf"))
-        block_mask.scatter_(1, col_idx, attn_mask)
-
         flat = B * num_heads
-        out = F.scaled_dot_product_attention(
-            q_patch.reshape(flat, patch_len, head_dim),
-            k_context.reshape(flat, patch_len * context_len, head_dim),
-            v_context.reshape(flat, patch_len * context_len, head_dim),
-            attn_mask=block_mask,  # (patch_len, patch_len*context_len) broadcasts over flat
-            dropout_p=dropout_p,
-        )      # (flat, patch_len, head_dim)
+        chunk_size = self.chunk_size
+        outputs: list[Tensor] = []
 
-        return out.reshape(B, num_heads, patch_len, head_dim)
+        for start in range(0, patch_len, chunk_size):
+            end = min(start + chunk_size, patch_len)
+            C = end - start  # actual chunk length
+
+            q_chunk = q_patch[:, :, start:end]    # (B, H, C, head_dim)
+            k_chunk = k_context[:, :, start:end]  # (B, H, C, context_len, head_dim)
+            v_chunk = v_context[:, :, start:end]  # (B, H, C, context_len, head_dim)
+            mask_chunk = attn_mask[start:end]      # (C, context_len)
+
+            # Build a block-diagonal mask so query i only attends to its own
+            # context_len keys (columns [i*context_len : (i+1)*context_len]).
+            col_idx = (
+                torch.arange(C, device=q_patch.device)[:, None] * context_len
+                + torch.arange(context_len, device=q_patch.device)[None, :]
+            )  # (C, context_len)
+            block_mask = q_patch.new_full((C, C * context_len), float("-inf"))
+            block_mask.scatter_(1, col_idx, mask_chunk)
+            # block_mask: (C, C*context_len)
+
+            out_chunk = F.scaled_dot_product_attention(
+                q_chunk.reshape(flat, C, head_dim),
+                k_chunk.reshape(flat, C * context_len, head_dim),
+                v_chunk.reshape(flat, C * context_len, head_dim),
+                attn_mask=block_mask,
+                dropout_p=dropout_p,
+            )  # (flat, C, head_dim)
+            outputs.append(out_chunk.reshape(B, num_heads, C, head_dim))
+
+        return torch.cat(outputs, dim=2)  # (B, num_heads, patch_len, head_dim)
 
 
 class StaticSparseViTBlock(nn.Module):
@@ -200,6 +298,10 @@ class StaticSparseViTBlock(nn.Module):
         expansion_factor: Hidden-dim expansion factor in the MLP.
         attn_dropout: Dropout in attention weights.
         proj_dropout: Dropout after attention and MLP projections.
+        chunk_size: Patch chunk size forwarded to :class:`StaticSparseAttention`.
+        rope_theta: RoPE base frequency forwarded to :class:`StaticSparseAttention`.
+        rope_coord_high: RoPE coordinate normalisation forwarded to
+            :class:`StaticSparseAttention`.
     """
 
     def __init__(
@@ -212,11 +314,15 @@ class StaticSparseViTBlock(nn.Module):
         expansion_factor: float = 4.0,
         attn_dropout: float = 0.0,
         proj_dropout: float = 0.0,
+        chunk_size: int = 512,
+        rope_theta: float = 10_000.0,
+        rope_coord_high: float = 100_000.0,
     ) -> None:
         super().__init__()
         self.norm1 = nn.LayerNorm(embed_dim)
         self.attn = StaticSparseAttention(
-            embed_dim, num_heads, num_cls, window_size, dilation, attn_dropout
+            embed_dim, num_heads, num_cls, window_size, dilation,
+            attn_dropout, chunk_size, rope_theta, rope_coord_high,
         )
         self.drop1 = nn.Dropout(proj_dropout)
 
@@ -230,8 +336,8 @@ class StaticSparseViTBlock(nn.Module):
             nn.Dropout(proj_dropout),
         )
 
-    def forward(self, x: Tensor) -> Tensor:
-        x = x + self.drop1(self.attn(self.norm1(x)))
+    def forward(self, x: Tensor, coords: Tensor | None = None) -> Tensor:
+        x = x + self.drop1(self.attn(self.norm1(x), coords))
         x = x + self.mlp(self.norm2(x))
         return x
 
@@ -254,6 +360,11 @@ class StaticSparseViTSlideEncoder(nn.Module):
         expansion_factor: MLP hidden-dim expansion factor.
         attn_dropout: Dropout on attention weights.
         proj_dropout: Dropout after projections.
+        chunk_size: Number of patch queries processed per SDPA call in the windowed
+            attention path. Must be >= 8 for Flash Attention / MMA.
+        rope_theta: Base frequency for 2-D RoPE. Default: 10_000.
+        rope_coord_high: Coordinate normalisation divisor for RoPE. Raw pixel
+            coordinates are divided by this value. Default: 100_000.
     """
 
     def __init__(
@@ -269,6 +380,9 @@ class StaticSparseViTSlideEncoder(nn.Module):
         expansion_factor: float = 4.0,
         attn_dropout: float = 0.0,
         proj_dropout: float = 0.0,
+        chunk_size: int = 512,
+        rope_theta: float = 10_000.0,
+        rope_coord_high: float = 100_000.0,
     ) -> None:
         super().__init__()
         self.num_cls = num_cls
@@ -292,6 +406,9 @@ class StaticSparseViTSlideEncoder(nn.Module):
                 expansion_factor=expansion_factor,
                 attn_dropout=attn_dropout,
                 proj_dropout=proj_dropout,
+                chunk_size=chunk_size,
+                rope_theta=rope_theta,
+                rope_coord_high=rope_coord_high,
             )
             for _ in range(num_layers)
         ])
@@ -314,8 +431,10 @@ class StaticSparseViTSlideEncoder(nn.Module):
         """Encode a bag of patch embeddings and return slide-level logits.
 
         Args:
-            x: Patch embeddings of shape ``(B, patch_len, in_features)``.
-            coords: coordinates of the patch embedding.
+            x: Patch embeddings ``(B, patch_len, in_features)``.
+            coords: Patch pixel coordinates ``(B, patch_len, 2)``.
+                When provided, 2-D RoPE is applied to patch Q and K inside
+                every attention layer. CLS tokens are never rotated.
 
         Returns:
             Dict with ``"logits"`` of shape ``(B, out_features)``.
@@ -333,7 +452,7 @@ class StaticSparseViTSlideEncoder(nn.Module):
         x = torch.cat([cls, x], dim=1)           # (B, num_cls + patch_len, embed_dim)
 
         for block in self.blocks:
-            x = block(x)
+            x = block(x, coords)
 
         x = self.norm(x)
 
