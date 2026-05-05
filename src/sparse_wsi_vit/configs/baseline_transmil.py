@@ -51,6 +51,9 @@ def get_config() -> ExperimentConfig:
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
         output_channels= OUT_FEATURES,
+        features_name="cls_224x224",
+        coords_name="coords_224x224",
+        flatten_block=False,
     )
 
     # Network: The Standard TransMIL baseline (Shao et al.)

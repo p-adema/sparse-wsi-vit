@@ -61,6 +61,9 @@ class TransMIL(nn.Module):
 
 
     def forward(self, x):
+        # Mean pooling to get (B, N, 64, D) --> (B, N, D)
+        if x.dim() == 4:
+            x = x.mean(dim = 2)
 
         h = x.float() #[B, n, in_features]
         
