@@ -37,10 +37,10 @@ def _indexer_fwd(
     offs_h = tl.arange(0, BLOCK_INDEXER_H)
     mask_t = offs_t < T
 
-    W = tl.load(W_ptr + offs_h)  # (H,)
+    W = tl.load(W_ptr + offs_h).to(tl.float16) # [H,]
 
     topk_scores  = tl.full((BLOCK_Q, TOP_K), float("-inf"), dtype=tl.float32)
-    topk_indices = tl.full((BLOCK_Q, TOP_K), 0,            dtype=tl.int32)
+    topk_indices = tl.full((BLOCK_Q, TOP_K), 0, dtype=tl.int32)
 
     for k_block in range(0, tl.cdiv(T, BLOCK_K)):
         offs_k = k_block * BLOCK_K + tl.arange(0, BLOCK_K)
@@ -66,9 +66,15 @@ def _indexer_fwd(
             Q = Q_fp8.to(tl.float16)  # (BLOCK_Q, H, BLOCK_D)
             K = K_fp8.to(tl.float16)  # (BLOCK_K, H, BLOCK_D)
 
-            Wq = tl.sum(Q * W[None, :, None], axis=1)  # (BLOCK_Q, BLOCK_D)
-            Wk = tl.sum(K * W[None, :, None], axis=1)  # (BLOCK_K, BLOCK_D)
-            block_scores += tl.dot(Wq, tl.trans(Wk), out_dtype=tl.float32)   # (BLOCK_Q, BLOCK_K)
+            Q = Q * W[None, :, None]
+            K = K * W[None, :, None]
+
+            Q = tl.reshape(Q, (BLOCK_Q, BLOCK_INDEXER_H * BLOCK_D))
+            K = tl.reshape(K, (BLOCK_K, BLOCK_INDEXER_H * BLOCK_D))
+
+            block_scores += tl.dot(
+                Q, tl.trans(K), out_dtype=tl.float32
+            )
 
         block_scores = tl.maximum(block_scores, 0.0)
         block_scores = tl.where(mask_k[None, :], block_scores, float("-inf"))
