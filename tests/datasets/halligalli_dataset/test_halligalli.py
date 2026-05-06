@@ -75,28 +75,3 @@ def test_shape_radius_parameter():
         image_size=64, shape_radius=20, target_label=1
     )
     assert img.shape == (64, 64, 3)
-
-
-def test_confounders_per_key_zero():
-    """confounders_per_key=0 runs without error."""
-    img, label, shapes, _ = HalliGalliGenerator.generate_single(
-        image_size=64, confounders_per_key=0, target_label=0
-    )
-    assert img.shape == (64, 64, 3)
-    assert label == 0
-
-
-def test_generate_single_separation_affects_positions():
-    """Higher separation pushes key positions further from centre."""
-    def spread(sep):
-        positions = []
-        for _ in range(10):
-            _, _, _, pos = HalliGalliGenerator.generate_single(
-                image_size=128, separation=sep
-            )
-            cy = [p[0] for p in pos]
-            positions.append(max(cy) - min(cy))
-        return np.mean(positions)
-
-    assert spread(0.9) > spread(0.3)
-

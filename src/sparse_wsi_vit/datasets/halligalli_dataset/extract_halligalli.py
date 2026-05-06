@@ -1,8 +1,9 @@
-"""Extract Virchow2 patch features from synthetic HalliGalli images.
+"""Extract ShapePatchCNN patch features from synthetic HalliGalli images.
 
-Replaces the FAST-based tissue segmentation and patch generation from the WSI
-pipeline with direct HalliGalli image generation. All patches are included —
-there is no tissue mask to apply.
+Uses a ShapePatchCNN checkpoint trained by train_patch_encoder.py as the
+frozen patch encoder. Replaces the FAST-based tissue segmentation and patch
+generation from the WSI pipeline with direct HalliGalli image generation.
+All patches are included — there is no tissue mask to apply.
 
 Produces one .h5 file per sample (keys: ``features``, ``coords``) and a
 ``labels.csv`` per split, matching the format expected by H5FeatureBagDataset.
@@ -24,7 +25,7 @@ Usage
 -----
     uv run src/sparse_wsi_vit/datasets/halligalli_dataset/extract_halligalli.py \\
         --output_dir data/halligalli \\
-        --hf_token <YOUR_HF_TOKEN>
+        --cnn_checkpoint checkpoints/patch_cnn/patch_cnn.pt
 """
 
 import argparse
@@ -35,59 +36,50 @@ from pathlib import Path
 import h5py
 import numpy as np
 import pandas as pd
-import timm
 import torch
 import torch.nn as nn
 from PIL import Image
-from timm.layers import SwiGLUPacked
+from torchvision.transforms.functional import to_tensor
 from tqdm import tqdm
 
 from sparse_wsi_vit.datasets.halligalli_dataset.halligalli import HalliGalliGenerator
+from sparse_wsi_vit.datasets.halligalli_dataset.patch_cnn import ShapePatchCNN
 
 
-class HuggingFaceVirchowExtractor(nn.Module):
-    def __init__(self, hf_token, device, concat_tokens=False):
+class CNNPatchExtractor(nn.Module):
+    """Frozen ShapePatchCNN used as a patch feature extractor.
+
+    Loads a checkpoint produced by train_patch_encoder.py, discards the
+    classification head, and extracts embed_dim-d features from raw
+    64×64 RGB patches (float32, values in [0, 1]).
+    """
+
+    def __init__(self, checkpoint_path: Path, device):
         super().__init__()
-        self.concat_tokens = concat_tokens
-
-        if hf_token:
-            print("Logging into Hugging Face...")
-            from huggingface_hub import login
-            login(token=hf_token)
-
-        print("Loading Virchow2 from Hugging Face hub (paige-ai/Virchow2)...")
-        self.model = timm.create_model(
-            "hf-hub:paige-ai/Virchow2",
-            pretrained=True,
-            mlp_layer=SwiGLUPacked,
-            act_layer=torch.nn.SiLU,
+        ckpt = torch.load(checkpoint_path, map_location=device)
+        self.model = ShapePatchCNN(
+            embed_dim=ckpt["embed_dim"],
+            num_classes=ckpt["num_classes"],
         )
-        self.model.to(device)
+        self.model.load_state_dict(ckpt["model"])
         self.model.eval()
+        for p in self.model.parameters():
+            p.requires_grad_(False)
+        self.model.to(device)
         self.device = device
 
-        from timm.data import resolve_data_config
-        from timm.data.transforms_factory import create_transform
+    @property
+    def embed_dim(self) -> int:
+        return self.model.embed_dim
 
-        self.transform = create_transform(
-            **resolve_data_config(self.model.pretrained_cfg, model=self.model)
-        )
+    @staticmethod
+    def transform(patch_pil: Image.Image) -> torch.Tensor:
+        """Convert a PIL patch to a float32 tensor in [0, 1] — no resize."""
+        return to_tensor(patch_pil)  # (3, H, W)
 
-    def forward(self, x):
-        with (
-            torch.inference_mode(),
-            torch.autocast(device_type="cuda", dtype=torch.float16),
-        ):
-            output = self.model(x)
-            class_token = output[:, 0]
-
-            if self.concat_tokens:
-                patch_tokens = output[:, 5:]
-                embedding = torch.cat([class_token, patch_tokens.mean(1)], dim=-1)
-            else:
-                embedding = class_token
-
-            return embedding.to(torch.float32)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        with torch.inference_mode():
+            return self.model.forward_features(x)
 
 
 def _extract_split(
@@ -96,7 +88,7 @@ def _extract_split(
     image_size: int,
     patch_size: int,
     generator_kwargs: dict,
-    model: HuggingFaceVirchowExtractor,
+    model: CNNPatchExtractor,
     output_dir: Path,
     batch_size: int,
 ):
@@ -193,16 +185,12 @@ def main():
     parser.add_argument("--test_size", type=int, default=400)
     parser.add_argument("--image_size", type=int, default=2048)
     parser.add_argument("--patch_size", type=int, default=64,
-                        help="Patch size in pixels. Each patch is resized to 224×224 for Virchow2.")
-    parser.add_argument("--separation", type=float, default=1.0)
+                        help="Patch size in pixels.")
     parser.add_argument("--clutter_density", type=float, default=4)
     parser.add_argument("--shape_radius", type=int, default=None,
                         help="Radius of key shapes in pixels. Defaults to image_size * 0.008.")
-    parser.add_argument("--confounders_per_key", type=int, default=2,
-                        help="Partial-shape fragments placed near each key shape. Set 0 to disable.")
-    parser.add_argument("--hf_token", type=str, default=None)
-    parser.add_argument("--concat_tokens", action="store_true",
-                        help="Use 2560-dim (CLS + mean patch) instead of 1280-dim (CLS only)")
+    parser.add_argument("--cnn_checkpoint", type=Path, required=True,
+                        help="Path to ShapePatchCNN checkpoint produced by train_patch_encoder.py.")
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--device", type=str, default="cuda:0")
     args = parser.parse_args()
@@ -213,28 +201,24 @@ def main():
         )
 
     device = torch.device(args.device)
-    model = HuggingFaceVirchowExtractor(args.hf_token, device, concat_tokens=args.concat_tokens)
+    print(f"Loading CNN encoder from {args.cnn_checkpoint} ...")
+    model = CNNPatchExtractor(args.cnn_checkpoint, device)
 
     generator_kwargs = {
-        "separation": args.separation,
         "clutter_density": args.clutter_density,
-        "confounders_per_key": args.confounders_per_key,
-        "shape_radius": args.shape_radius,
+        "shape_radius":    args.shape_radius,
     }
 
     metadata = {
-        "train_size":         args.train_size,
-        "val_size":           args.val_size,
-        "test_size":          args.test_size,
-        "image_size":         args.image_size,
-        "patch_size":         args.patch_size,
-        "separation":         args.separation,
-        "clutter_density":    args.clutter_density,
-        "shape_radius":       args.shape_radius,
-        "confounders_per_key": args.confounders_per_key,
-        "concat_tokens":      args.concat_tokens,
-        "feature_dim":        2560 if args.concat_tokens else 1280,
-        "encoder":            "paige-ai/Virchow2",
+        "train_size":      args.train_size,
+        "val_size":        args.val_size,
+        "test_size":       args.test_size,
+        "image_size":      args.image_size,
+        "patch_size":      args.patch_size,
+        "clutter_density": args.clutter_density,
+        "shape_radius":    args.shape_radius,
+        "encoder":         f"ShapePatchCNN:{args.cnn_checkpoint.name}",
+        "feature_dim":     model.embed_dim,
     }
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))

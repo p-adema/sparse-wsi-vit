@@ -38,45 +38,15 @@ def test_collate_rejects_multi_bag():
         _mil_collate_fn([bag, bag])
 
 
-def test_corners_only_returns_four_patches():
-    bag = _make_bag(64)  # 8×8 grid
-    out = _mil_collate_fn([bag], corners_only=True)
-    assert out["input"].shape == (1, 4, 8)
-    assert out["coords"].shape == (1, 4, 2)
-
-
-def test_corners_only_selects_extreme_coords():
-    bag = _make_bag(64)  # 8×8 grid, coords from (0,0) to (1792,1792)
-    out = _mil_collate_fn([bag], corners_only=True)
-    coords = out["coords"][0]  # (4, 2)
-
-    xs = coords[:, 0].tolist()
-    ys = coords[:, 1].tolist()
-    assert set(xs) == {0.0, 1792.0}, f"Unexpected x values: {xs}"
-    assert set(ys) == {0.0, 1792.0}, f"Unexpected y values: {ys}"
-
-
-def test_corners_only_features_match_coords():
-    """Each returned feature vector must correspond to a corner coord in the original bag."""
+def test_collate_preserves_all_patches():
     bag = _make_bag(64)
-    out = _mil_collate_fn([bag], corners_only=True)
-
-    orig_coords = bag["coords"]
-    orig_feats = bag["input"]
-    sel_coords = out["coords"][0]
-    sel_feats = out["input"][0]
-
-    for i in range(4):
-        coord = sel_coords[i]
-        feat = sel_feats[i]
-        # find the matching row in the original bag
-        matches = (orig_coords == coord).all(dim=1)
-        assert matches.any(), f"Corner coord {coord} not found in original coords"
-        orig_feat = orig_feats[matches][0]
-        assert torch.allclose(feat, orig_feat), "Feature mismatch for corner patch"
-
-
-def test_corners_only_false_returns_all_patches():
-    bag = _make_bag(64)
-    out = _mil_collate_fn([bag], corners_only=False)
+    out = _mil_collate_fn([bag])
     assert out["input"].shape == (1, 64, 8)
+    assert out["coords"].shape == (1, 64, 2)
+
+
+def test_collate_passthrough_fields():
+    """Non-tensor fields in the bag dict are preserved unchanged."""
+    bag = _make_bag(16)
+    out = _mil_collate_fn([bag])
+    assert out["slide_name"] == "test"
