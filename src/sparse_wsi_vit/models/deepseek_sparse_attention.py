@@ -279,7 +279,7 @@ class DSAViTSlideEncoder(nn.Module):
         nn.init.zeros_(self.input_proj.bias)
         nn.init.zeros_(self.head.bias)
 
-    def forward(self, x: Tensor) -> dict[str, Tensor]:
+    def forward(self, x: Tensor, coords=None) -> dict[str, Tensor]:
         """Encode a bag of patch embeddings and return slide-level logits.
 
         Args:
