@@ -61,7 +61,7 @@ class DeepSeekSparseAttention(nn.Module):
         self.kv_proj = nn.Linear(d_model, 2 * self.head_dim)     # shared K + V
         self.out_proj = nn.Linear(d_model, d_model)
 
-    def forward(self, x):
+    def forward(self, x, coords=None):
         B, T, _ = x.shape
         device, dtype = x.device, x.dtype
 

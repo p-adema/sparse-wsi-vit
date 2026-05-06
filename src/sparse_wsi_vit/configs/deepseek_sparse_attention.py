@@ -17,11 +17,12 @@ from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
 
 from sparse_wsi_vit.models.deepseek_sparse_attention import DSAViTSlideEncoder
 from sparse_wsi_vit.experiments.lightning_wrappers.mil_wrapper import MILWrapper
+from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import WSIAttnWrapper
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 
 # ─── Data Details ──────────────────────────────────────────────
-CSV_BASE   = Path.home() / "splits/tcga-emb/0"
-FEATURES_DIR = Path.home() / "tcga-emb"
+CSV_BASE   = Path.home() / "splits/tcga-tmb/4"
+FEATURES_DIR = Path.home() / "tcga-v2/"
 
 # ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1  # Standard for MIL bags
@@ -29,11 +30,13 @@ NUM_WORKERS = 4
 IN_FEATURES = 1280
 OUT_FEATURES = 1  # Binary task
 PRECISION = "bf16-mixed"
-EMBED_DIM = 256
+EMBED_DIM = 64
 NUM_HEADS = 4
 NUM_LAYERS = 1
 NUM_CLS = 2
-CHECKPOINT_ACTIVATIONS = True
+CHECKPOINT_ACTIVATIONS = False
+WORKER_PREFETCH = 10
+CLASS_WEIGHTS = True
 
 # DSA specific config
 INDEXER_HEADS = 4
@@ -43,7 +46,7 @@ BLOCK_Q = 32
 BLOCK_K = 32
 BLOCK_D = 32   
 
-TRAINING_ITERATIONS = 20
+TRAINING_ITERATIONS = 1000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
 LEARNING_RATE = 2e-4
 WEIGHT_DECAY = 1e-4
@@ -64,6 +67,10 @@ def get_config() -> ExperimentConfig:
         label_col_name = "label",
         batch_size   = BATCH_SIZE,
         num_workers  = NUM_WORKERS,
+        class_weights=CLASS_WEIGHTS,
+        worker_prefetch = WORKER_PREFETCH,
+        features_name = "cls_224x224",  # low resolution!
+        coords_name = "coords_224x224",
     )
 
     # Network: DSAViTSlideEncoder
@@ -86,8 +93,11 @@ def get_config() -> ExperimentConfig:
     )
 
     # Lightning wrapper mappings
-    config.lightning_wrapper_class = LazyConfig(MILWrapper)(
-        use_bce_loss=(OUT_FEATURES == 1)
+    config.lightning_wrapper_class = LazyConfig(WSIAttnWrapper)(
+        use_bce_loss=(OUT_FEATURES == 1),
+        training_crop_tokens=None,
+        eval_crop_tokens=None,
+        compile_mode="max-autotune-no-cudagraphs",
     )
 
     # Optimizer
