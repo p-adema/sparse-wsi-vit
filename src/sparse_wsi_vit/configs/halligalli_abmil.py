@@ -1,6 +1,7 @@
-"""ABMIL on pre-extracted Virchow2 features from HalliGalli synthetic images.
+"""ABMIL on pre-extracted ShapePatchCNN features from HalliGalli synthetic images.
 
-Virchow2 (1280-dim CLS token) is used as a frozen patch encoder.
+ShapePatchCNN (256-dim embedding) is trained from scratch on the HalliGalli
+shape vocabulary and used as a frozen patch encoder.
 Features are pre-extracted by extract_halligalli.py.
 
 Usage:
@@ -22,9 +23,9 @@ from sparse_wsi_vit.experiments.lightning_wrappers.mil_wrapper import MILWrapper
 from sparse_wsi_vit.experiments.datamodules.halligalli_h5_datamodule import HalliGalliH5DataModule
 
 # ─── Data ────────────────────────────────────────────────────────────────────
-DATA_DIR    = os.environ["HALLIGALLI_DATA_DIR"]  # set in job script: export HALLIGALLI_DATA_DIR=/scratch-shared/$USER/halligalli_virchow
-IN_FEATURES = 1280                       # Virchow2 CLS token; use 2560 if --concat_tokens
-OUT_FEATURES = 2                         # binary, CrossEntropy
+DATA_DIR     = os.environ["HALLIGALLI_DATA_DIR"]
+IN_FEATURES  = 256    # ShapePatchCNN embed_dim
+OUT_FEATURES = 2      # binary, CrossEntropy
 
 # ─── Optimisation ────────────────────────────────────────────────────────────
 BATCH_SIZE    = 1     # standard for MIL bags
@@ -84,7 +85,7 @@ def get_config() -> ExperimentConfig:
 
     config.wandb = WandbConfig(
         project="wsi-classification",
-        job_group="halligalli_abmil_virchow",
+        job_group="halligalli_abmil_cnn",
     )
 
     return config
