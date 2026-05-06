@@ -14,6 +14,72 @@ from sparse_wsi_vit.models.deepseek_sparse_attention_kernels.kernels import (
 )
 
 
+def _rotate_half(x: Tensor) -> Tensor:
+    """Rotate adjacent pairs: [..., x1, x2, ...] → [..., -x2, x1, ...]."""
+    x1 = x[..., 0::2]
+    x2 = x[..., 1::2]
+    return torch.stack([-x2, x1], dim=-1).flatten(-2)
+
+
+class Rope2D(nn.Module):
+    """2-D Rotary Position Embedding for patch tokens.
+
+    Applies 1-D RoPE independently along the x and y coordinate axes.
+    ``head_dim`` is split evenly: the first half encodes x, the second
+    half encodes y.
+
+    Args:
+        head_dim: Per-head feature dimension. Must be divisible by 4.
+        theta: RoPE base frequency.
+        coord_high: Coordinate normalisation divisor.  Raw pixel coords
+            are divided by this value before computing frequencies.
+            Default: 100_000 — matches ViT-5 ``rope_dynamic_high`` and
+            is suitable for WSI pixel-level coordinates.
+    """
+
+    def __init__(
+        self,
+        head_dim: int,
+        theta: float = 10_000.0,
+        coord_high: float = 100_000.0,
+    ) -> None:
+        super().__init__()
+        if head_dim % 4 != 0:
+            raise ValueError(
+                f"head_dim must be divisible by 4 for 2D RoPE, got {head_dim}"
+            )
+        half = head_dim // 2
+        inv_freq = 1.0 / (theta ** (torch.arange(0, half, 2).float() / half))
+        self.register_buffer("inv_freq", inv_freq)  # (half // 2,)
+        self.coord_high = coord_high
+
+    def forward(self, x: Tensor, coords: Tensor) -> Tensor:
+        """Rotate Q or K using 2-D spatial coordinates.
+
+        Args:
+            x: ``(B, num_heads, L, head_dim)`` — patch queries or keys.
+            coords: ``(B, L, 2)`` — (x, y) pixel coordinates for each patch.
+
+        Returns:
+            Rotated tensor, same shape as ``x``.
+        """
+        xy = coords.float() / self.coord_high  # (B, L, 2)
+
+        # Per-token frequency vectors for each axis: (B, L, half//2)
+        freq_x = torch.einsum("bl, f -> blf", xy[..., 0], self.inv_freq)
+        freq_y = torch.einsum("bl, f -> blf", xy[..., 1], self.inv_freq)
+
+        # Repeat each freq to align with rotate_half on adjacent pairs
+        freq_x = freq_x.repeat_interleave(2, dim=-1)  # (B, L, half)
+        freq_y = freq_y.repeat_interleave(2, dim=-1)  # (B, L, half)
+
+        freqs = torch.cat([freq_x, freq_y], dim=-1)   # (B, L, head_dim)
+        cos = freqs.cos().unsqueeze(1)  # (B, 1, L, head_dim)
+        sin = freqs.sin().unsqueeze(1)
+
+        return x * cos + _rotate_half(x) * sin
+
+
 # Top-level module
 
 class DeepSeekSparseAttention(nn.Module):
@@ -34,6 +100,8 @@ class DeepSeekSparseAttention(nn.Module):
         BLOCK_Q,
         BLOCK_K,
         BLOCK_D,
+        rope_theta: float = 10_000.0,
+        rope_coord_high: float = 100_000.0,
     ):
         super().__init__()
 
@@ -61,6 +129,8 @@ class DeepSeekSparseAttention(nn.Module):
         self.kv_proj = nn.Linear(d_model, 2 * self.head_dim)     # shared K + V
         self.out_proj = nn.Linear(d_model, d_model)
 
+        self.rope = Rope2D(self.head_dim, theta=rope_theta, coord_high=rope_coord_high)
+
     def forward(self, x, coords=None):
         B, T, _ = x.shape
         device, dtype = x.device, x.dtype
@@ -73,6 +143,14 @@ class DeepSeekSparseAttention(nn.Module):
         kv = self.kv_proj(x)                                   # (B, T, 2*head_dim)
         k, v = kv.split(self.head_dim, dim=-1)                 # each (B, T, head_dim)
         k, v = k.contiguous(), v.contiguous()
+
+        k = k.unsqueeze(1).expand(-1, self.attention_heads, -1, -1)  # (B, H, T, head_dim)
+
+        if coords is not None:
+            q = self.rope(q, coords)
+            k = self.rope(k, coords)
+
+        k = k[:, 0]   # (B, T, head_dim)
 
         q_proj, k_proj = self.indexer_proj(x)  # (B, T, IH, ID)
 
