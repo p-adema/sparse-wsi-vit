@@ -52,20 +52,23 @@ def _indexer_fwd(
             offs_d = d_block * BLOCK_D + tl.arange(0, BLOCK_D)
             mask_d = offs_d < D
 
-            Q = tl.load(
+            Q_fp8 = tl.load(
                 Q_ptr + pid_b*sqb + offs_t[:, None, None]*sqt
                       + offs_h[None, :, None]*sqh + offs_d[None, None, :]*sqd,
                 mask=mask_t[:, None, None] & mask_d[None, None, :], other=0.0,
             )  # (BLOCK_Q, H, BLOCK_D)
-            K = tl.load(
+            K_fp8 = tl.load(
                 K_ptr + pid_b*skb + offs_k[:, None, None]*skt
                       + offs_h[None, :, None]*skh + offs_d[None, None, :]*skd,
                 mask=mask_k[:, None, None] & mask_d[None, None, :], other=0.0,
             )  # (BLOCK_K, H, BLOCK_D)
 
+            Q = Q_fp8.to(tl.float16)  # (BLOCK_Q, H, BLOCK_D)
+            K = K_fp8.to(tl.float16)  # (BLOCK_K, H, BLOCK_D)
+
             Wq = tl.sum(Q * W[None, :, None], axis=1)  # (BLOCK_Q, BLOCK_D)
             Wk = tl.sum(K * W[None, :, None], axis=1)  # (BLOCK_K, BLOCK_D)
-            block_scores += tl.dot(Wq, tl.trans(Wk))   # (BLOCK_Q, BLOCK_K)
+            block_scores += tl.dot(Wq, tl.trans(Wk), out_dtype=tl.float32)   # (BLOCK_Q, BLOCK_K)
 
         block_scores = tl.maximum(block_scores, 0.0)
         block_scores = tl.where(mask_k[None, :], block_scores, float("-inf"))
@@ -362,10 +365,13 @@ class LightningIndexerFunction(torch.autograd.Function):
         svlb, svlt, svlk    = valid_ptr.stride()
         ssb, sst, ssk       = scores_ptr.stride()
 
+        q_fp8 = q_proj.detach().to(torch.float8_e4m3fn)
+        k_fp8 = k_proj.detach().to(torch.float8_e4m3fn)
+
         grid = (B, math.ceil(T / BLOCK_Q))
 
         _indexer_fwd[grid](
-            q_proj, k_proj, idx_ptr, valid_ptr, scores_ptr, W,
+            q_fp8, k_fp8, idx_ptr, valid_ptr, scores_ptr, W,
             sqb, sqt, sqh, sqd,
             skb, skt, skh, skd,
             sib, sit, sik,
