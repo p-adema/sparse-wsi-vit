@@ -35,7 +35,7 @@ OUT_FEATURES = 1  # Binary tasks
 PRECISION = "bf16-mixed"
 CHECKPOINT_ACTIVATIONS = True  # instead of cropping
 
-TRAINING_ITERATIONS = 10_000
+TRAINING_ITERATIONS = 1_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
 LEARNING_RATE = 2e-4
 WEIGHT_DECAY = 1e-4
@@ -67,7 +67,6 @@ def get_config() -> ExperimentConfig:
         in_features=IN_FEATURES,
         out_features=OUT_FEATURES,
         checkpoint_activations=CHECKPOINT_ACTIVATIONS,
-        # downproj=768,  # this is bad! but I need it for now to keep VRAM low because I have other processes running too.
     )
 
     # Lightning wrapper mappings
@@ -103,9 +102,7 @@ def get_config() -> ExperimentConfig:
 
     # W&B Logging
     config.wandb = WandbConfig(
-        project="wsi-classification",
-        job_group="baseline_vit5",
-        entity="dl2-2026"
+        project="wsi-classification", job_group="baseline_vit5", entity="dl2-2026"
     )
 
     return config
