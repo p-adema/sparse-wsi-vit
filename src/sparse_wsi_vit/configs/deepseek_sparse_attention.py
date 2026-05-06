@@ -30,9 +30,9 @@ NUM_WORKERS = 4
 IN_FEATURES = 1280
 OUT_FEATURES = 1  # Binary task
 PRECISION = "bf16-mixed"
-EMBED_DIM = 64
+EMBED_DIM = 384
 NUM_HEADS = 4
-NUM_LAYERS = 1
+NUM_LAYERS = 6
 NUM_CLS = 2
 CHECKPOINT_ACTIVATIONS = False
 WORKER_PREFETCH = 10
@@ -46,7 +46,7 @@ BLOCK_Q = 32
 BLOCK_K = 32
 BLOCK_D = 32   
 
-TRAINING_ITERATIONS = 1000
+TRAINING_ITERATIONS = 10000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
 LEARNING_RATE = 2e-4
 WEIGHT_DECAY = 1e-4
@@ -69,8 +69,8 @@ def get_config() -> ExperimentConfig:
         num_workers  = NUM_WORKERS,
         class_weights=CLASS_WEIGHTS,
         worker_prefetch = WORKER_PREFETCH,
-        features_name = "cls_224x224",  # low resolution!
-        coords_name = "coords_224x224",
+        features_name = "cls_112x112",  # low resolution!
+        coords_name = "coords_112x112",
     )
 
     # Network: DSAViTSlideEncoder
@@ -126,7 +126,7 @@ def get_config() -> ExperimentConfig:
     # W&B Logging
     config.wandb = WandbConfig(
         project="wsi-classification",
-        # entity="dl2-2026",
+        entity="dl2-2026",
         job_group="deepseek_sparse_attention",
     )
 
