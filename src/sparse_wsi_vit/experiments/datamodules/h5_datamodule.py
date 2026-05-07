@@ -86,6 +86,11 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         self.flatten_block = flatten_block
 
     def setup(self, stage: str | None = None) -> None:
+        """Instantiate train and validation datasets.
+
+        Args:
+            stage: Either ``"fit"`` or ``None``; only ``"fit"`` is supported.
+        """
         if stage in ("fit", None):
             if isinstance(self.train_csv, list):
                 from torch.utils.data import ConcatDataset
@@ -156,4 +161,3 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
             pin_memory=True,
             prefetch_factor=self.worker_prefetch,
         )
-    def
