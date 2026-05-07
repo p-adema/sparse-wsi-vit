@@ -18,7 +18,7 @@ from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
 from sparse_wsi_vit.models.static_sparse_attention import StaticSparseViTSlideEncoder
 from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import WSIAttnWrapper
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
-
+import pandas as pd
 # ─── Data Details ──────────────────────────────────────────────
 SPLITS_ROOT = Path("../splits/tcga-tmb")
 FEATURES_DIR = "../tcga-v2/"
