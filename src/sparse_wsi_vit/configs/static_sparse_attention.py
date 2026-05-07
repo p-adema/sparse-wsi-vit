@@ -28,6 +28,18 @@ TRAIN_CSVS = [str(d / "train.csv") for d in _fold_dirs]
 print(f"{TRAIN_CSVS=}")
 VAL_CSVS = [str(d / "val.csv") for d in _fold_dirs]
 print(f"{VAL_CSVS=}")
+
+
+import pandas as pd
+
+train_slides = set(pd.concat([pd.read_csv(c) for c in TRAIN_CSVS])["slide_name"])
+val_slides = set(pd.concat([pd.read_csv(c) for c in VAL_CSVS])["slide_name"])
+
+overlap = train_slides & val_slides
+print(f"Train: {len(train_slides)}, Val: {len(val_slides)}, Overlap: {len(overlap)}")
+if overlap:
+    print("Overlapping slides:", overlap)
+
 # ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1  # Standard for MIL bags
 NUM_WORKERS = 4
