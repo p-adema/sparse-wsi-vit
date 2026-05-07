@@ -28,9 +28,9 @@ NUM_WORKERS = 4
 IN_FEATURES = 1280
 OUT_FEATURES = 1  # Binary task
 PRECISION = "bf16-mixed"
-EMBED_DIM = 128
-NUM_HEADS = 2
-NUM_LAYERS = 2
+EMBED_DIM = 256
+NUM_HEADS = 4
+NUM_LAYERS = 4
 NUM_CLS = 2
 WINDOW_SIZE = 3
 DILATION = 1
@@ -40,7 +40,7 @@ CLASS_WEIGHTS = True
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
 LEARNING_RATE = 2e-4
 WEIGHT_DECAY = 1e-4
-TRAINING_ITERATIONS = 10_000
+TRAINING_ITERATIONS = 2000
 GRAD_CLIP = 1.0
 ACCUMULATE_GRAD_STEPS = 10
 
@@ -60,8 +60,8 @@ def get_config() -> ExperimentConfig:
         num_workers=NUM_WORKERS,
         class_weights=CLASS_WEIGHTS,
         worker_prefetch=WORKER_PREFETCH,
-        features_name="cls_224x224",  # low resolution!
-        coords_name="coords_224x224",
+        features_name="cls_112x112",
+        coords_name="coords_112x112",
     )
 
     # Network: StaticSparseViTSlideEncoder
