@@ -462,7 +462,10 @@ class StaticSparseViTSlideEncoder(nn.Module):
 
         logits = self.head(cls_out)  # (B, out_features)
 
-        print("max_memory_allocated: ", torch.cuda.memory.max_memory_allocated)
+
+        mem = torch.cuda.memory.max_memory_allocated()
+
+        print("max_memory_allocated: ", mem)
 
         return {"logits": logits}
 
