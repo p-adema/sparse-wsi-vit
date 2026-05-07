@@ -91,6 +91,9 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         Args:
             stage: Either ``"fit"`` or ``None``; only ``"fit"`` is supported.
         """
+        train_csv = list(self.train_csv) if not isinstance(self.train_csv, str) else self.train_csv
+        val_csv = list(self.val_csv) if not isinstance(self.val_csv, str) else self.val_csv
+
         if stage in ("fit", None):
             if isinstance(self.train_csv, list):
                 from torch.utils.data import ConcatDataset
@@ -103,7 +106,7 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
                         features_name=self.features_name,
                         coords_name=self.coords_name,
                         flatten_block=self.flatten_block,
-                    ) for csv in self.train_csv
+                    ) for csv in train_csv
                 ])
             else:
                 self.train_dataset = H5FeatureBagDataset(
@@ -126,7 +129,7 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
                         features_name=self.features_name,
                         coords_name=self.coords_name,
                         flatten_block=self.flatten_block,
-                    ) for csv in self.val_csv
+                    ) for csv in val_csv
                 ])
             else:
                 self.val_dataset = H5FeatureBagDataset(
