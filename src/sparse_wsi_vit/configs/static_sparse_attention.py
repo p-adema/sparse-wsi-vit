@@ -29,11 +29,6 @@ print(f"{TRAIN_CSVS=}")
 VAL_CSVS = [str(d / "val.csv") for d in _fold_dirs]
 print(f"{VAL_CSVS=}")
 
-
-import pandas as pd
-
-train_slides = set(pd.concat([pd.read_csv(c) for c in TRAIN_CSVS])["slide_name"])
-val_slides = set(pd.concat([pd.read_csv(c) for c in VAL_CSVS])["slide_name"])
 train_slides = set(pd.concat([pd.read_csv(c) for c in TRAIN_CSVS])["slidename"])
 val_slides = set(pd.concat([pd.read_csv(c) for c in VAL_CSVS])["slidename"])
 
