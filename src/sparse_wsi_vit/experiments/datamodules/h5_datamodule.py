@@ -91,11 +91,11 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         Args:
             stage: Either ``"fit"`` or ``None``; only ``"fit"`` is supported.
         """
-        train_csv = list(self.train_csv) if not isinstance(self.train_csv, str) else self.train_csv
-        val_csv = list(self.val_csv) if not isinstance(self.val_csv, str) else self.val_csv
-
         if stage in ("fit", None):
-            if isinstance(self.train_csv, list):
+            train_csv = list(self.train_csv) if not isinstance(self.train_csv, str) else self.train_csv
+            val_csv = list(self.val_csv) if not isinstance(self.val_csv, str) else self.val_csv
+
+            if isinstance(train_csv, list):
                 from torch.utils.data import ConcatDataset
                 self.train_dataset = ConcatDataset([
                     H5FeatureBagDataset(
@@ -110,7 +110,7 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
                 ])
             else:
                 self.train_dataset = H5FeatureBagDataset(
-                    csv_path=self.train_csv,
+                    csv_path=train_csv,
                     features_dir=self.features_dir,
                     label_col_name=self.label_col_name,
                     class_weights=self.class_weights,
@@ -119,7 +119,7 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
                     flatten_block=self.flatten_block,
                 )
 
-            if isinstance(self.val_csv, list):
+            if isinstance(val_csv, list):
                 from torch.utils.data import ConcatDataset
                 self.val_dataset = ConcatDataset([
                     H5FeatureBagDataset(
@@ -133,7 +133,7 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
                 ])
             else:
                 self.val_dataset = H5FeatureBagDataset(
-                    csv_path=self.val_csv,
+                    csv_path=val_csv,
                     features_dir=self.features_dir,
                     label_col_name=self.label_col_name,
                     features_name=self.features_name,
