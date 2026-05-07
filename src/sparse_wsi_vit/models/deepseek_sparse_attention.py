@@ -253,8 +253,8 @@ class DSAViTBlock(nn.Module):
             nn.Dropout(proj_dropout),
         )
 
-    def forward(self, x: Tensor) -> Tensor:
-        x = x + self.drop1(self.attn(self.norm1(x)))
+    def forward(self, x: Tensor, coords=None) -> Tensor:
+        x = x + self.drop1(self.attn(self.norm1(x), coords))
         x = x + self.mlp(self.norm2(x))
         return x
 
@@ -384,7 +384,7 @@ class DSAViTSlideEncoder(nn.Module):
             if self.gradient_checkpointing and self.training:
                 x = checkpoint(block, x, use_reentrant=False)
             else:
-                x = block(x)
+                x = block(x, coords)
 
         x = self.norm(x)
 
