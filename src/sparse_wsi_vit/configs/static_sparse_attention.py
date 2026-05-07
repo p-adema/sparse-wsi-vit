@@ -60,7 +60,7 @@ def get_config() -> ExperimentConfig:
         num_workers=NUM_WORKERS,
         class_weights=CLASS_WEIGHTS,
         worker_prefetch=WORKER_PREFETCH,
-        features_name="cls_112x112",
+        features_name="patch_112x112",
         coords_name="coords_112x112",
     )
 
