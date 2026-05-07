@@ -86,12 +86,21 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         self.flatten_block = flatten_block
 
     def setup(self, stage: str | None = None) -> None:
-        """Instantiate train and validation datasets.
-
-        Args:
-            stage: Either ``"fit"`` or ``None``; only ``"fit"`` is supported.
-        """
-        if stage in ("fit", None):
+    if stage in ("fit", None):
+        if isinstance(self.train_csv, list):
+            from torch.utils.data import ConcatDataset
+            self.train_dataset = ConcatDataset([
+                H5FeatureBagDataset(
+                    csv_path=csv,
+                    features_dir=self.features_dir,
+                    label_col_name=self.label_col_name,
+                    class_weights=self.class_weights,
+                    features_name=self.features_name,
+                    coords_name=self.coords_name,
+                    flatten_block=self.flatten_block,
+                ) for csv in self.train_csv
+            ])
+        else:
             self.train_dataset = H5FeatureBagDataset(
                 csv_path=self.train_csv,
                 features_dir=self.features_dir,
@@ -101,6 +110,20 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
                 coords_name=self.coords_name,
                 flatten_block=self.flatten_block,
             )
+
+        if isinstance(self.val_csv, list):
+            from torch.utils.data import ConcatDataset
+            self.val_dataset = ConcatDataset([
+                H5FeatureBagDataset(
+                    csv_path=csv,
+                    features_dir=self.features_dir,
+                    label_col_name=self.label_col_name,
+                    features_name=self.features_name,
+                    coords_name=self.coords_name,
+                    flatten_block=self.flatten_block,
+                ) for csv in self.val_csv
+            ])
+        else:
             self.val_dataset = H5FeatureBagDataset(
                 csv_path=self.val_csv,
                 features_dir=self.features_dir,
@@ -133,3 +156,4 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
             pin_memory=True,
             prefetch_factor=self.worker_prefetch,
         )
+    def

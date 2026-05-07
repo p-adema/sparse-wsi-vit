@@ -20,8 +20,14 @@ from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import WSIAt
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 
 # ─── Data Details ──────────────────────────────────────────────
-CSV_BASE = "../splits/tcga-tmb/4"
+SPLITS_ROOT = Path("../splits/tcga-tmb")
 FEATURES_DIR = "../tcga-v2/"
+
+_fold_dirs = sorted(d for d in SPLITS_ROOT.iterdir() if d.is_dir())
+TRAIN_CSVS = [str(d / "train.csv") for d in _fold_dirs]
+print(f"{TRAIN_CSVS=}")
+VAL_CSVS = [str(d / "val.csv") for d in _fold_dirs]
+print(f"{VAL_CSVS=}")
 # ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1  # Standard for MIL bags
 NUM_WORKERS = 4
@@ -52,15 +58,15 @@ def get_config() -> ExperimentConfig:
 
     # Dataset: Connects to your H5 extraction
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
-        train_csv=f"{CSV_BASE}/train.csv",
-        val_csv=f"{CSV_BASE}/val.csv",
+        train_csv=TRAIN_CSVS,
+        val_csv=VAL_CSVS,
         features_dir=FEATURES_DIR,
         label_col_name="label",
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
         class_weights=CLASS_WEIGHTS,
         worker_prefetch=WORKER_PREFETCH,
-        features_name="cls_224x224",  # low resolution!
+        features_name="cls_224x224",
         coords_name="coords_224x224",
     )
 
