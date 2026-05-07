@@ -34,6 +34,8 @@ import pandas as pd
 
 train_slides = set(pd.concat([pd.read_csv(c) for c in TRAIN_CSVS])["slide_name"])
 val_slides = set(pd.concat([pd.read_csv(c) for c in VAL_CSVS])["slide_name"])
+train_slides = set(pd.concat([pd.read_csv(c) for c in TRAIN_CSVS])["slidename"])
+val_slides = set(pd.concat([pd.read_csv(c) for c in VAL_CSVS])["slidename"])
 
 overlap = train_slides & val_slides
 print(f"Train: {len(train_slides)}, Val: {len(val_slides)}, Overlap: {len(overlap)}")
