@@ -19,8 +19,8 @@ from sparse_wsi_vit.models.static_sparse_attention import StaticSparseViTSlideEn
 from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import WSIAttnWrapper
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 # ─── Data Details ──────────────────────────────────────────────
-SPLITS_ROOT = Path("../splits/tcga-tmb")
-FEATURES_DIR = "../tcga-v2/"
+SPLITS_ROOT = Path("../splits/camelyon")
+FEATURES_DIR = "../camelyon-emb/"
 
 _fold_dirs = sorted(d for d in SPLITS_ROOT.iterdir() if d.is_dir())
 TRAIN_CSVS = [str(d / "train.csv") for d in _fold_dirs]
@@ -29,16 +29,16 @@ VAL_CSVS = [str(d / "val.csv") for d in _fold_dirs]
 print(f"{VAL_CSVS=}")
 
 
-#SBATCH --partition=gpu_h100
-#SBATCH --gpus=1
-#SBATCH --job-name=static_sparse_attention_test
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=180G
-#SBATCH --time=6:00:00
-#SBATCH --mail-type=ALL
-#SBATCH --mail-user=thomas.vos2@student.uva.nl
-#SBATCH --output=/home/scur0097/logging/slurm/%j.out
+# SBATCH --partition=gpu_h100
+# SBATCH --gpus=1
+# SBATCH --job-name=static_sparse_attention_test
+# SBATCH --ntasks=1
+# SBATCH --cpus-per-task=16
+# SBATCH --mem=180G
+# SBATCH --time=6:00:00
+# SBATCH --mail-type=ALL
+# SBATCH --mail-user=thomas.vos2@student.uva.nl
+# SBATCH --output=/home/scur0097/logging/slurm/%j.out
 train_slides = set(pd.concat([pd.read_csv(c) for c in TRAIN_CSVS])["slidename"])
 val_slides = set(pd.concat([pd.read_csv(c) for c in VAL_CSVS])["slidename"])
 
