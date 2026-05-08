@@ -18,7 +18,6 @@ from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
 from sparse_wsi_vit.models.static_sparse_attention import StaticSparseViTSlideEncoder
 from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import WSIAttnWrapper
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
-import pandas as pd
 # ─── Data Details ──────────────────────────────────────────────
 SPLITS_ROOT = Path("../splits/tcga-tmb")
 FEATURES_DIR = "../tcga-v2/"
@@ -29,6 +28,17 @@ print(f"{TRAIN_CSVS=}")
 VAL_CSVS = [str(d / "val.csv") for d in _fold_dirs]
 print(f"{VAL_CSVS=}")
 
+
+#SBATCH --partition=gpu_h100
+#SBATCH --gpus=1
+#SBATCH --job-name=static_sparse_attention_test
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=180G
+#SBATCH --time=6:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=thomas.vos2@student.uva.nl
+#SBATCH --output=/home/scur0097/logging/slurm/%j.out
 train_slides = set(pd.concat([pd.read_csv(c) for c in TRAIN_CSVS])["slidename"])
 val_slides = set(pd.concat([pd.read_csv(c) for c in VAL_CSVS])["slidename"])
 
@@ -42,7 +52,7 @@ BATCH_SIZE = 1  # Standard for MIL bags
 NUM_WORKERS = 4
 IN_FEATURES = 1280
 OUT_FEATURES = 1  # Binary task
-PRECISION = "bf16-mixed"
+PRECISION = "32-true"
 EMBED_DIM = 128
 NUM_HEADS = 2
 NUM_LAYERS = 4
@@ -75,8 +85,8 @@ def get_config() -> ExperimentConfig:
         num_workers=NUM_WORKERS,
         class_weights=CLASS_WEIGHTS,
         worker_prefetch=WORKER_PREFETCH,
-        features_name="cls_224x224",
-        coords_name="coords_224x224",
+        features_name="patches_112x112",
+        coords_name="coords_112x112",
     )
 
     # Network: StaticSparseViTSlideEncoder
