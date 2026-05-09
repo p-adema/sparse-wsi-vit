@@ -177,7 +177,8 @@ def _sanity_check(model: ShapePatchCNN, val_dataset: ShapePatchDataset,
             for feat, label in zip(feats, labels.tolist()):
                 if len(embeddings[label]) < n_per_class:
                     embeddings[label].append(feat)
-            if all(len(v) >= n_per_class for v in embeddings.values()):
+            if (len(embeddings) == NUM_CLASSES
+                    and all(len(v) >= n_per_class for v in embeddings.values())):
                 break
 
     classes = sorted(embeddings.keys())
