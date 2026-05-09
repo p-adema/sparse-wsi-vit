@@ -469,5 +469,44 @@ class StaticSparseViTSlideEncoder(nn.Module):
 
         return {"logits": logits}
 
+class StaticSparseAttentionAdapter(nn.Module):
+    """Adapts StaticSparseAttention to the ViT-5 Block ``Attention_block`` API.
+
+    ``Block.__init__`` calls ``Attention_block(dim, num_heads=..., attn_drop=...,
+    flash=..., rope_size=..., ...)`` with ViT-5-specific kwargs. This adapter
+    accepts the relevant subset and silently absorbs the rest via ``**_``.
+    """
+
+    def __init__(
+        self,
+        dim: int,
+        num_heads: int = 8,
+        *,
+        num_cls: int = 1,
+        window_size: int = 0,
+        dilation: int = 1,
+        chunk_size: int = 512,
+        rope_theta: float = 10_000.0,
+        rope_coord_high: float = 100_000.0,
+        attn_drop: float = 0.0,
+        **_,
+    ) -> None:
+        super().__init__()
+        self.attn = StaticSparseAttention(
+            embed_dim=dim,
+            num_heads=num_heads,
+            num_cls=num_cls,
+            window_size=window_size,
+            dilation=dilation,
+            attn_dropout=attn_drop,
+            chunk_size=chunk_size,
+            rope_theta=rope_theta,
+            rope_coord_high=rope_coord_high,
+        )
+
+    def forward(self, x: Tensor, coords: Tensor | None = None) -> Tensor:
+        return self.attn(x, coords)
+
+
 # Notes:
 # embed_dim / num_heads should equal 64
