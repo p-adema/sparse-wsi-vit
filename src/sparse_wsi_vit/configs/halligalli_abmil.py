@@ -29,10 +29,10 @@ OUT_FEATURES = 2      # binary, CrossEntropy
 
 # ─── Optimisation ────────────────────────────────────────────────────────────
 BATCH_SIZE    = 1     # standard for MIL bags
-NUM_WORKERS   = 4
+NUM_WORKERS   = 16
 PRECISION     = "bf16-mixed"
 
-TRAINING_ITERATIONS          = 5_000
+TRAINING_ITERATIONS          = 10_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
 LEARNING_RATE                = 2e-4
 WEIGHT_DECAY                 = 1e-4
