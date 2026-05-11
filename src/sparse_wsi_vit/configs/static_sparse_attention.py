@@ -23,6 +23,21 @@ from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDat
 CSV_BASE=Path("../splits/camelyon/0")
 FEATURES_DIR="../camelyon-emb/"
 
+
+train_csv = str(CSV_BASE / "train.csv")
+print(f"{train_csv=}")
+val_csv = str(CSV_BASE / "val.csv")
+print(f"{val_csv=}")
+
+train_slides = set(pd.read_csv(train_csv)["slidename"])
+val_slides = set(pd.read_csv(val_csv)["slidename"])
+
+overlap = train_slides & val_slides
+print(f"Train: {len(train_slides)}, Val: {len(val_slides)}, Overlap: {len(overlap)}")
+if overlap:
+    print("Overlapping slides:", overlap)
+
+
 # ─── Sparse attention type ───────────────────────────────────────────────────
 SPARSE_ATTN="static"
 
