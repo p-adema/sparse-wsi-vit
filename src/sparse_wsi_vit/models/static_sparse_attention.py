@@ -216,13 +216,26 @@ class StaticSparseAttention(nn.Module):
         pad = window_size * dilation
 
         # Pad k/v along the sequence axis so boundary patches can use the same
-        # gather logic as interior patches (padded positions are masked out below).
+        # window logic as interior patches (padded positions are masked out below).
         k_padded = F.pad(k_patch, (0, 0, pad, pad))  # (batch_size, num_heads, patch_len+2*pad, head_dim)
         v_padded = F.pad(v_patch, (0, 0, pad, pad))
 
-        # Precompute window offsets and boundary window positions (shared across chunks).
-        offsets    = torch.arange(window_len, device=q_patch.device) * dilation  # (window_len,)
+        # Precompute boundary window positions (shared across chunks).
         window_pos = (torch.arange(window_len, device=q_patch.device) - window_size) * dilation  # (window_len,)
+
+        # For dilation=1, unfold gives a zero-copy strided view of all windows:
+        #   shape (batch_size, num_heads, patch_len, head_dim, window_len) → permute → (... window_len, head_dim)
+        # For dilation>1 we fall back to torch.gather inside the loop.
+        use_unfold = (dilation == 1)
+        if use_unfold:
+            # unfold(dim, size, step=1): returns a non-contiguous strided VIEW — no allocation.
+            # Slicing it per-chunk inside the loop materialises only `chunk` rows at a time
+            # (via the subsequent torch.cat), which is the memory-bounded path we want.
+            k_all_windows = k_padded.unfold(2, window_len, 1).permute(0, 1, 2, 4, 3)
+            v_all_windows = v_padded.unfold(2, window_len, 1).permute(0, 1, 2, 4, 3)
+            # shapes (strided views): (batch_size, num_heads, patch_len, window_len, head_dim)
+        else:
+            offsets = torch.arange(window_len, device=q_patch.device) * dilation  # (window_len,)
 
         # Pre-expand CLS k/v — shape is small; safe to keep fully expanded.
         k_cls_exp = k_cls.unsqueeze(2)   # (batch_size, num_heads, 1, num_cls, head_dim)  — broadcast below
@@ -233,24 +246,26 @@ class StaticSparseAttention(nn.Module):
             end   = min(start + chunk_size, patch_len)
             chunk = end - start  # number of patches in this chunk
 
-            chunk_positions = torch.arange(start, end, device=q_patch.device)  # (chunk,)
-
-            # Gather indices for this chunk's window neighbours.
-            gather_idx = chunk_positions.unsqueeze(1) + offsets.unsqueeze(0)  # (chunk, window_len)
-            gather_idx_exp = (
-                gather_idx
-                .unsqueeze(0).unsqueeze(0).unsqueeze(-1)              # (1, 1, chunk, window_len, 1)
-                .expand(batch_size, num_heads, -1, -1, head_dim)      # (batch_size, num_heads, chunk, window_len, head_dim)
-            )
-
-            k_windows = torch.gather(
-                k_padded.unsqueeze(3).expand(-1, -1, -1, window_len, -1),
-                2, gather_idx_exp,
-            )  # (batch_size, num_heads, chunk, window_len, head_dim)
-            v_windows = torch.gather(
-                v_padded.unsqueeze(3).expand(-1, -1, -1, window_len, -1),
-                2, gather_idx_exp,
-            )  # (batch_size, num_heads, chunk, window_len, head_dim)
+            if use_unfold:
+                # Zero-copy slice from the pre-computed strided view
+                k_windows = k_all_windows[:, :, start:end]  # (batch_size, num_heads, chunk, window_len, head_dim)
+                v_windows = v_all_windows[:, :, start:end]
+            else:
+                chunk_positions = torch.arange(start, end, device=q_patch.device)  # (chunk,)
+                gather_idx = chunk_positions.unsqueeze(1) + offsets.unsqueeze(0)  # (chunk, window_len)
+                gather_idx_exp = (
+                    gather_idx
+                    .unsqueeze(0).unsqueeze(0).unsqueeze(-1)              # (1, 1, chunk, window_len, 1)
+                    .expand(batch_size, num_heads, -1, -1, head_dim)      # (batch_size, num_heads, chunk, window_len, head_dim)
+                )
+                k_windows = torch.gather(
+                    k_padded.unsqueeze(3).expand(-1, -1, -1, window_len, -1),
+                    2, gather_idx_exp,
+                )  # (batch_size, num_heads, chunk, window_len, head_dim)
+                v_windows = torch.gather(
+                    v_padded.unsqueeze(3).expand(-1, -1, -1, window_len, -1),
+                    2, gather_idx_exp,
+                )  # (batch_size, num_heads, chunk, window_len, head_dim)
 
             # Prepend CLS tokens: (batch_size, num_heads, chunk, context_len, head_dim)
             k_context = torch.cat(
@@ -261,8 +276,9 @@ class StaticSparseAttention(nn.Module):
             )
 
             # Boundary mask for this chunk: (chunk, context_len)
-            in_bounds   = (chunk_positions.unsqueeze(1) + window_pos >= 0) & \
-                          (chunk_positions.unsqueeze(1) + window_pos < patch_len)
+            chunk_positions_for_mask = torch.arange(start, end, device=q_patch.device)
+            in_bounds   = (chunk_positions_for_mask.unsqueeze(1) + window_pos >= 0) & \
+                          (chunk_positions_for_mask.unsqueeze(1) + window_pos < patch_len)
             window_mask = q_patch.new_zeros(chunk, window_len)
             window_mask[~in_bounds] = float("-inf")
             attn_mask   = torch.cat(
