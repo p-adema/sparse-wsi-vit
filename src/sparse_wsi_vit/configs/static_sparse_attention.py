@@ -6,6 +6,7 @@ Usage:
 
 import torch
 from pathlib import Path
+import pandas as pd
 
 from sparse_wsi_vit.experiments.default_cfg import (
     ExperimentConfig,
