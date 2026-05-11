@@ -397,3 +397,44 @@ class DSAViTSlideEncoder(nn.Module):
 
         return {"logits": logits}
 
+
+class DeepseekSparseAttentionAdapter(nn.Module):
+    """Adapts DeepseekSparseAttention to the ViT-5 Block ``Attention_block`` API.
+
+    ``Block.__init__`` calls ``Attention_block(dim, num_heads=..., attn_drop=...,
+    flash=..., rope_size=..., ...)`` with ViT-5-specific kwargs. This adapter
+    accepts the relevant subset and silently absorbs the rest via ``**_``.
+    """
+
+    def __init__(
+        self,
+        dim: int,
+        num_heads: int = 8,
+        *,
+        indexer_heads: int = 4,
+        indexer_dim: int = 32,
+        top_k: int = 128,
+        BLOCK_Q: int = 32,
+        BLOCK_K: int = 32,
+        BLOCK_D: int = 32,
+        rope_theta: float = 10_000.0,
+        rope_coord_high: float = 100_000.0,
+        **_,
+    ) -> None:
+        super().__init__()
+        self.attn = DeepSeekSparseAttention(
+            d_model=dim,
+            attention_heads=num_heads,
+            indexer_heads=indexer_heads,
+            indexer_dim=indexer_dim,
+            top_k=top_k,
+            BLOCK_Q=BLOCK_Q,
+            BLOCK_K=BLOCK_K,
+            BLOCK_D=BLOCK_D,
+            rope_theta=rope_theta,
+            rope_coord_high=rope_coord_high,
+        )
+
+    def forward(self, x: Tensor, coords: Tensor | None = None) -> Tensor:
+        return self.attn(x, coords)
+
