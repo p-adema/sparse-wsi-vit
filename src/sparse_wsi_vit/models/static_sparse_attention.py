@@ -7,34 +7,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-try:
-    from torch.nn.attention.flex_attention import (
-        flex_attention as _flex_attention_eager,
-        create_block_mask,
-    )
-    # Pre-compile so it always runs as a fused kernel, even when the enclosing
-    # model is not itself wrapped in torch.compile (e.g. during sanity checks).
-    _flex_attention = torch.compile(_flex_attention_eager, dynamic=False, fullgraph=True)
-    _FLEX_AVAILABLE = True
-except ImportError:
-    _FLEX_AVAILABLE = False
-    _flex_attention = None
-
-
-def _make_sparse_mask_mod(num_cls: int, window_size: int, dilation: int):
-    """Return a flex_attention mask_mod for the Longformer-style sparse pattern.
-
-    CLS tokens (indices < num_cls) attend to all tokens and receive attention
-    from all tokens.  Patch tokens attend to CLS tokens plus a dilated local
-    window of radius ``window_size`` with step ``dilation``.
-    """
-    def mask_mod(b, h, q_idx, kv_idx):
-        q_is_cls  = q_idx  < num_cls
-        kv_is_cls = kv_idx < num_cls
-        diff = (kv_idx - num_cls) - (q_idx - num_cls)  # patch-relative offset
-        in_window = (diff.abs() <= window_size * dilation) & (diff % dilation == 0)
-        return q_is_cls | kv_is_cls | in_window
-    return mask_mod
 
 def _rotate_half(x: Tensor) -> Tensor:
     """Rotate adjacent pairs: [..., x1, x2, ...] → [..., -x2, x1, ...]."""
@@ -165,34 +137,17 @@ class StaticSparseAttention(nn.Module):
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=True)
         self.attn_dropout = attn_dropout
 
-        if _FLEX_AVAILABLE and window_size > 0:
-            self._mask_mod = _make_sparse_mask_mod(num_cls, window_size, dilation)
-        else:
-            self._mask_mod = None
-        self._block_mask_cache: dict = {}
-
-    def _get_block_mask(self, seq_len: int, device: torch.device):
-        key = (seq_len, device)
-        if key not in self._block_mask_cache:
-            self._block_mask_cache[key] = create_block_mask(
-                self._mask_mod,
-                B=None, H=None,
-                Q_LEN=seq_len, KV_LEN=seq_len,
-                device=device,
-            )
-        return self._block_mask_cache[key]
-
     def forward(self, x: Tensor, coords: Tensor | None = None) -> Tensor:
         """Static sparse attention.
 
         Args:
-            x: Token sequence ``(B, num_cls + patch_len, embed_dim)``,
+            x: Token sequence ``(batch_size, num_cls + patch_len, embed_dim)``,
                CLS tokens prepended.
-            coords: Patch pixel coordinates ``(B, patch_len, 2)``.
+            coords: Patch pixel coordinates ``(batch_size, patch_len, 2)``.
                When provided, 2-D RoPE is applied to patch Q and K.
 
         Returns:
-            Output of shape ``(B, num_cls + patch_len, embed_dim)``.
+            Output of shape ``(batch_size, num_cls + patch_len, embed_dim)``.
         """
         batch_size, seq_len, embed_dim = x.shape
         num_cls = self.num_cls
@@ -209,35 +164,24 @@ class StaticSparseAttention(nn.Module):
 
         dropout_p = self.attn_dropout if self.training else 0.0
 
-        # flex_attention path
-        use_flex = (
-            self._mask_mod is not None
-            and x.is_cuda
-            and dropout_p == 0.0
-        )
+        q_cls, k_cls, v_cls = q[:, :, :num_cls], k[:, :, :num_cls], v[:, :, :num_cls]
+        q_patch              = q[:, :, num_cls:]
 
-        if use_flex:
-            block_mask = self._get_block_mask(seq_len, x.device)
-            out = _flex_attention(q, k, v, block_mask=block_mask)
+        # CLS tokens: global attention over the full sequence
+        cls_out = F.scaled_dot_product_attention(q_cls, k, v, dropout_p=dropout_p)
+
+        # Patch tokens: CLS only, or CLS + dilated local window
+        if self.window_size == 0:
+            patch_out = F.scaled_dot_product_attention(
+                q_patch, k_cls, v_cls, dropout_p=dropout_p
+            )
         else:
-            q_cls, k_cls, v_cls = q[:, :, :num_cls], k[:, :, :num_cls], v[:, :, :num_cls]
-            q_patch                = q[:, :, num_cls:]
-
-            # CLS tokens: global attention over the full sequence
-            cls_out = F.scaled_dot_product_attention(q_cls, k, v, dropout_p=dropout_p)
-
-            # Patch tokens: CLS only, or CLS + dilated local window
-            if self.window_size == 0:
-                patch_out = F.scaled_dot_product_attention(
-                    q_patch, k_cls, v_cls, dropout_p=dropout_p
-                )
-            else:
-                patch_out = self._windowed_patch_attention(
-                    q_patch, k_cls, v_cls,
-                    k[:, :, num_cls:], v[:, :, num_cls:],
-                    patch_len, dropout_p,
-                )
-            out = torch.cat([cls_out, patch_out], dim=2)
+            patch_out = self._windowed_patch_attention(
+                q_patch, k_cls, v_cls,
+                k[:, :, num_cls:], v[:, :, num_cls:],
+                patch_len, dropout_p,
+            )
+        out = torch.cat([cls_out, patch_out], dim=2)
 
         out = out.transpose(1, 2).reshape(batch_size, seq_len, embed_dim)
         return self.out_proj(out)
