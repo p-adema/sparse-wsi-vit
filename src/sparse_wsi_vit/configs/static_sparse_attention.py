@@ -19,33 +19,8 @@ from sparse_wsi_vit.models.static_sparse_attention import StaticSparseViTSlideEn
 from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import WSIAttnWrapper
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 # ─── Data Details ──────────────────────────────────────────────
-SPLITS_ROOT = Path("../splits/camelyon")
+CSV_BASE = Path("../splits/camelyon/0")
 FEATURES_DIR = "../camelyon-emb/"
-
-_fold_dirs = sorted(d for d in SPLITS_ROOT.iterdir() if d.is_dir())
-TRAIN_CSVS = [str(d / "train.csv") for d in _fold_dirs]
-print(f"{TRAIN_CSVS=}")
-VAL_CSVS = [str(d / "val.csv") for d in _fold_dirs]
-print(f"{VAL_CSVS=}")
-
-
-# SBATCH --partition=gpu_h100
-# SBATCH --gpus=1
-# SBATCH --job-name=static_sparse_attention_test
-# SBATCH --ntasks=1
-# SBATCH --cpus-per-task=16
-# SBATCH --mem=180G
-# SBATCH --time=6:00:00
-# SBATCH --mail-type=ALL
-# SBATCH --mail-user=thomas.vos2@student.uva.nl
-# SBATCH --output=/home/scur0097/logging/slurm/%j.out
-train_slides = set(pd.concat([pd.read_csv(c) for c in TRAIN_CSVS])["slidename"])
-val_slides = set(pd.concat([pd.read_csv(c) for c in VAL_CSVS])["slidename"])
-
-overlap = train_slides & val_slides
-print(f"Train: {len(train_slides)}, Val: {len(val_slides)}, Overlap: {len(overlap)}")
-if overlap:
-    print("Overlapping slides:", overlap)
 
 # ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1  # Standard for MIL bags
@@ -77,8 +52,8 @@ def get_config() -> ExperimentConfig:
 
     # Dataset: Connects to your H5 extraction
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
-        train_csv=TRAIN_CSVS,
-        val_csv=VAL_CSVS,
+        train_csv=f"{CSV_BASE}/train.csv",
+        val_csv=f"{CSV_BASE}/val.csv",
         features_dir=FEATURES_DIR,
         label_col_name="label",
         batch_size=BATCH_SIZE,
