@@ -7,6 +7,28 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
+try:
+    from torch.nn.attention.flex_attention import flex_attention, create_block_mask
+    _FLEX_AVAILABLE = True
+except ImportError:
+    _FLEX_AVAILABLE = False
+
+
+def _make_sparse_mask_mod(num_cls: int, window_size: int, dilation: int):
+    """Return a flex_attention mask_mod for the Longformer-style sparse pattern.
+
+    CLS tokens (indices < num_cls) attend to all tokens and receive attention
+    from all tokens.  Patch tokens attend to CLS tokens plus a dilated local
+    window of radius ``window_size`` with step ``dilation``.
+    """
+    def mask_mod(b, h, q_idx, kv_idx):
+        q_is_cls  = q_idx  < num_cls
+        kv_is_cls = kv_idx < num_cls
+        diff = (kv_idx - num_cls) - (q_idx - num_cls)  # patch-relative offset
+        in_window = (diff.abs() <= window_size * dilation) & (diff % dilation == 0)
+        return q_is_cls | kv_is_cls | in_window
+    return mask_mod
+
 def _rotate_half(x: Tensor) -> Tensor:
     """Rotate adjacent pairs: [..., x1, x2, ...] → [..., -x2, x1, ...]."""
     x1 = x[..., 0::2]
@@ -50,24 +72,24 @@ class Rope2D(nn.Module):
         """Rotate Q or K using 2-D spatial coordinates.
 
         Args:
-            x: ``(B, num_heads, L, head_dim)`` — patch queries or keys.
-            coords: ``(B, L, 2)`` — (x, y) pixel coordinates for each patch.
+            x: ``(batch_size, num_heads, patch_len, head_dim)`` — patch queries or keys.
+            coords: ``(batch_size, patch_len, 2)`` — (x, y) pixel coordinates for each patch.
 
         Returns:
             Rotated tensor, same shape as ``x``.
         """
-        xy = coords.float() / self.coord_high  # (B, L, 2)
+        xy = coords.float() / self.coord_high  # (batch_size, patch_len, 2)
 
-        # Per-token frequency vectors for each axis: (B, L, half//2)
+        # Per-token frequency vectors for each axis: (batch_size, patch_len, half//2)
         freq_x = torch.einsum("bl, f -> blf", xy[..., 0], self.inv_freq)
         freq_y = torch.einsum("bl, f -> blf", xy[..., 1], self.inv_freq)
 
         # Repeat each freq to align with rotate_half on adjacent pairs
-        freq_x = freq_x.repeat_interleave(2, dim=-1)  # (B, L, half)
-        freq_y = freq_y.repeat_interleave(2, dim=-1)  # (B, L, half)
+        freq_x = freq_x.repeat_interleave(2, dim=-1)  # (batch_size, patch_len, half)
+        freq_y = freq_y.repeat_interleave(2, dim=-1)  # (batch_size, patch_len, half)
 
-        freqs = torch.cat([freq_x, freq_y], dim=-1)   # (B, L, head_dim)
-        cos = freqs.cos().unsqueeze(1)  # (B, 1, L, head_dim)
+        freqs = torch.cat([freq_x, freq_y], dim=-1)   # (batch_size, patch_len, head_dim)
+        cos = freqs.cos().unsqueeze(1)  # (batch_size, 1, patch_len, head_dim)
         sin = freqs.sin().unsqueeze(1)
 
         return x * cos + _rotate_half(x) * sin
@@ -136,6 +158,23 @@ class StaticSparseAttention(nn.Module):
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=True)
         self.attn_dropout = attn_dropout
 
+        if _FLEX_AVAILABLE and window_size > 0:
+            self._mask_mod = _make_sparse_mask_mod(num_cls, window_size, dilation)
+        else:
+            self._mask_mod = None
+        self._block_mask_cache: dict = {}
+
+    def _get_block_mask(self, seq_len: int, device: torch.device):
+        key = (seq_len, device)
+        if key not in self._block_mask_cache:
+            self._block_mask_cache[key] = create_block_mask(
+                self._mask_mod,
+                B=None, H=None,
+                Q_LEN=seq_len, KV_LEN=seq_len,
+                device=device,
+            )
+        return self._block_mask_cache[key]
+
     def forward(self, x: Tensor, coords: Tensor | None = None) -> Tensor:
         """Static sparse attention.
 
@@ -148,142 +187,149 @@ class StaticSparseAttention(nn.Module):
         Returns:
             Output of shape ``(B, num_cls + patch_len, embed_dim)``.
         """
-        B, seq_len, embed_dim = x.shape
+        batch_size, seq_len, embed_dim = x.shape
         num_cls = self.num_cls
         patch_len = seq_len - num_cls
 
-        qkv = self.qkv(x).reshape(B, seq_len, 3, self.num_heads, self.head_dim)
-        qkv = qkv.permute(2, 0, 3, 1, 4)  # (3, B, num_heads, seq_len, head_dim)
-        q, k, v = qkv.unbind(0)           # each (B, num_heads, seq_len, head_dim)
+        qkv = self.qkv(x).reshape(batch_size, seq_len, 3, self.num_heads, self.head_dim)
+        qkv = qkv.permute(2, 0, 3, 1, 4)  # (3, batch_size, num_heads, seq_len, head_dim)
+        q, k, v = qkv.unbind(0)            # each (batch_size, num_heads, seq_len, head_dim)
 
-        q_cls,   k_cls,   v_cls = q[:, :, :num_cls],  k[:, :, :num_cls],  v[:, :, :num_cls]
-        q_patch, k_patch, v_patch = q[:, :, num_cls:],  k[:, :, num_cls:],  v[:, :, num_cls:]
-
-        # Apply 2-D RoPE to patch Q and K
+        # Apply 2-D RoPE to patch Q and K — CLS tokens have no spatial position
         if coords is not None:
-            q_patch = self.rope(q_patch, coords)
-            k_patch = self.rope(k_patch, coords)
-            k = torch.cat([k_cls, k_patch], dim=2)
+            q = torch.cat([q[:, :, :num_cls], self.rope(q[:, :, num_cls:], coords)], dim=2)
+            k = torch.cat([k[:, :, :num_cls], self.rope(k[:, :, num_cls:], coords)], dim=2)
 
         dropout_p = self.attn_dropout if self.training else 0.0
 
-        # CLS tokens: global attention over the full sequence
-        cls_out = F.scaled_dot_product_attention(
-            q_cls, k, v, dropout_p=dropout_p
-        )  # (B, num_heads, num_cls, head_dim)
+        # flex_attention path
+        use_flex = (
+            self._mask_mod is not None
+            and x.is_cuda
+            and dropout_p == 0.0
+        )
 
-        # Patch tokens: CLS (+ dilated local window)
-        if self.window_size == 0:
-            patch_out = F.scaled_dot_product_attention(
-                q_patch, k_cls, v_cls, dropout_p=dropout_p
-            )  # (B, num_heads, patch_len, head_dim)
+        if use_flex:
+            print("using flex attn")
+            block_mask = self._get_block_mask(seq_len, x.device)
+            out = flex_attention(q, k, v, block_mask=block_mask)
         else:
-            patch_out = self._windowed_patch_attention(
-                q_patch, k_cls, v_cls, k_patch, v_patch, patch_len, dropout_p
-            )  # (B, num_heads, patch_len, head_dim)
+            q_cls, k_cls, v_cls = q[:, :, :num_cls], k[:, :, :num_cls], v[:, :, :num_cls]
+            q_patch                = q[:, :, num_cls:]
 
-        out = torch.cat([cls_out, patch_out], dim=2)    # (B, num_heads, seq_len, head_dim)
-        out = out.transpose(1, 2).reshape(B, seq_len, embed_dim)  # (B, seq_len, embed_dim)
+            # CLS tokens: global attention over the full sequence
+            cls_out = F.scaled_dot_product_attention(q_cls, k, v, dropout_p=dropout_p)
+
+            # Patch tokens: CLS only, or CLS + dilated local window
+            if self.window_size == 0:
+                patch_out = F.scaled_dot_product_attention(
+                    q_patch, k_cls, v_cls, dropout_p=dropout_p
+                )
+            else:
+                patch_out = self._windowed_patch_attention(
+                    q_patch, k_cls, v_cls,
+                    k[:, :, num_cls:], v[:, :, num_cls:],
+                    patch_len, dropout_p,
+                )
+            out = torch.cat([cls_out, patch_out], dim=2)
+
+        out = out.transpose(1, 2).reshape(batch_size, seq_len, embed_dim)
         return self.out_proj(out)
 
     def _windowed_patch_attention(
         self,
-        q_patch: Tensor,  # (B, num_heads, patch_len, head_dim)
-        k_cls:   Tensor,  # (B, num_heads, num_cls,   head_dim)
-        v_cls:   Tensor,  # (B, num_heads, num_cls,   head_dim)
-        k_patch: Tensor,  # (B, num_heads, patch_len, head_dim)
-        v_patch: Tensor,  # (B, num_heads, patch_len, head_dim)
+        q_patch: Tensor,  # (batch_size, num_heads, patch_len, head_dim)
+        k_cls:   Tensor,  # (batch_size, num_heads, num_cls,   head_dim)
+        v_cls:   Tensor,  # (batch_size, num_heads, num_cls,   head_dim)
+        k_patch: Tensor,  # (batch_size, num_heads, patch_len, head_dim)
+        v_patch: Tensor,  # (batch_size, num_heads, patch_len, head_dim)
         patch_len: int,
         dropout_p: float,
     ) -> Tensor:
         """Each patch attends to its CLS tokens plus a dilated local window.
 
+        Keys/values are gathered once into
+        (batch_size, num_heads, patch_len, context_len, head_dim), then every
+        query runs as an independent SDPA call via
+        (batch_size * num_heads * patch_len, 1, head_dim) batching.
+        This is O(patch_len * context_len) in both FLOPs and memory.
+
         Boundary patches attend to fewer neighbours (masked, not wrapped).
 
-        Returns: (B, num_heads, patch_len, head_dim)
+        Returns: (batch_size, num_heads, patch_len, head_dim)
         """
-        B, num_heads, _, head_dim = q_patch.shape
+        batch_size, num_heads, _, head_dim = q_patch.shape
         num_cls = self.num_cls
         window_size = self.window_size
         dilation = self.dilation
         window_len = 2 * window_size + 1
         context_len = num_cls + window_len
-
         pad = window_size * dilation
-        k_padded = F.pad(k_patch, (0, 0, pad, pad))  # (B, num_heads, patch_len + 2*pad, head_dim)
+
+        # Pad k/v along the sequence axis so boundary patches can use the same
+        # gather logic as interior patches (padded positions are masked out below).
+        k_padded = F.pad(k_patch, (0, 0, pad, pad))  # (batch_size, num_heads, patch_len+2*pad, head_dim)
         v_padded = F.pad(v_patch, (0, 0, pad, pad))
 
+        # Gather the window keys/values for every patch in one shot.
+        positions  = torch.arange(patch_len,  device=q_patch.device)
+        offsets    = torch.arange(window_len, device=q_patch.device) * dilation
+        gather_idx = positions.unsqueeze(1) + offsets.unsqueeze(0)  # (patch_len, window_len)
 
-        # create indexing map
-        patch_positions = torch.arange(patch_len, device=q_patch.device)           # (patch_len,)
-        window_offsets = torch.arange(window_len, device=q_patch.device) * dilation  # (window_len,)
-        gather_idx = patch_positions.unsqueeze(1) + window_offsets.unsqueeze(0)    # (patch_len, window_len)
-
-        # replicate gather_idx map to match across batch, heads and emb_dim
         gather_idx_exp = (
             gather_idx
-            .unsqueeze(0).unsqueeze(0)          # (1, 1, patch_len, window_len)
-            .unsqueeze(-1)                       # (1, 1, patch_len, window_len, 1)
-            .expand(B, num_heads, -1, -1, head_dim)  # (B, num_heads, patch_len, window_len, head_dim)
+            .unsqueeze(0).unsqueeze(0).unsqueeze(-1)                    # (1, 1, patch_len, window_len, 1)
+            .expand(batch_size, num_heads, -1, -1, head_dim)            # (batch_size, num_heads, patch_len, window_len, head_dim)
         )
+        k_windows = torch.gather(
+            k_padded.unsqueeze(3).expand(-1, -1, -1, window_len, -1), 2, gather_idx_exp
+        )  # (batch_size, num_heads, patch_len, window_len, head_dim)
+        v_windows = torch.gather(
+            v_padded.unsqueeze(3).expand(-1, -1, -1, window_len, -1), 2, gather_idx_exp
+        )  # (batch_size, num_heads, patch_len, window_len, head_dim)
 
-        k_padded_exp = k_padded.unsqueeze(3).expand(-1, -1, -1, window_len, -1)  # (B, num_heads, patch_len+2*pad, window_len, head_dim)
-        v_padded_exp = v_padded.unsqueeze(3).expand(-1, -1, -1, window_len, -1)  # (B, num_heads, patch_len+2*pad, window_len, head_dim)
-
-        k_windows = torch.gather(k_padded_exp, 2, gather_idx_exp)  # (B, num_heads, patch_len, window_len, head_dim)
-        v_windows = torch.gather(v_padded_exp, 2, gather_idx_exp)
-
+        # Prepend CLS tokens to each patch's context
         k_context = torch.cat(
             [k_cls.unsqueeze(2).expand(-1, -1, patch_len, -1, -1), k_windows], dim=3
-        )  # (B, num_heads, patch_len, context_len, head_dim)
+        )  # (batch_size, num_heads, patch_len, context_len, head_dim)
         v_context = torch.cat(
             [v_cls.unsqueeze(2).expand(-1, -1, patch_len, -1, -1), v_windows], dim=3
+        )  # (batch_size, num_heads, patch_len, context_len, head_dim)
+
+        # Boundary mask: -inf for window slots that fall outside [0, patch_len).
+        # CLS slots are always valid (zero mask). Shape: (patch_len, context_len).
+        window_pos = (torch.arange(window_len, device=q_patch.device) - window_size) * dilation
+        in_bounds  = (positions.unsqueeze(1) + window_pos >= 0) & \
+                     (positions.unsqueeze(1) + window_pos < patch_len)  # (patch_len, window_len)
+        window_mask = q_patch.new_zeros(patch_len, window_len)
+        window_mask[~in_bounds] = float("-inf")
+        attn_mask = torch.cat(
+            [q_patch.new_zeros(patch_len, num_cls), window_mask], dim=1
+        )  # (patch_len, context_len)
+
+        # Reshape for per-query SDPA: treat every (batch, head, patch) triple as
+        # an independent sequence of length 1 attending to context_len keys.
+        num_queries_flat = batch_size * num_heads * patch_len
+        q_flat = q_patch.reshape(num_queries_flat, 1, head_dim)
+        k_flat = k_context.reshape(num_queries_flat, context_len, head_dim)
+        v_flat = v_context.reshape(num_queries_flat, context_len, head_dim)
+
+        # Expand mask: (patch_len, context_len) → (batch_size*num_heads*patch_len, 1, context_len)
+        mask_flat = (
+            attn_mask
+            .unsqueeze(1)                                        # (patch_len, 1, context_len)
+            .unsqueeze(0)                                        # (1, patch_len, 1, context_len)
+            .expand(batch_size * num_heads, -1, -1, -1)         # (batch_size*num_heads, patch_len, 1, context_len)
+            .reshape(num_queries_flat, 1, context_len)
         )
 
-        # mask out-of-bounds window positions
-        patch_idx = torch.arange(patch_len, device=q_patch.device).unsqueeze(1)      # (patch_len, 1)
-        window_pos = (torch.arange(window_len, device=q_patch.device) - window_size) * dilation  # (window_len,)
-        in_bounds = (patch_idx + window_pos >= 0) & (patch_idx + window_pos < patch_len)  # (patch_len, window_len)
+        out = F.scaled_dot_product_attention(
+            q_flat, k_flat, v_flat,
+            attn_mask=mask_flat,
+            dropout_p=dropout_p,
+        )  # (batch_size*num_heads*patch_len, 1, head_dim)
 
-        # mask: 0 for valid, -inf for out-of-bounds. CLS positions always valid.
-        window_mask = torch.zeros(patch_len, window_len, device=q_patch.device, dtype=q_patch.dtype)
-        window_mask[~in_bounds] = float("-inf")
-        cls_mask = torch.zeros(patch_len, num_cls, device=q_patch.device, dtype=q_patch.dtype)
-        attn_mask = torch.cat([cls_mask, window_mask], dim=1)  # (patch_len, context_len)
-
-        flat = B * num_heads
-        chunk_size = self.chunk_size
-        outputs: list[Tensor] = []
-
-        for start in range(0, patch_len, chunk_size):
-            end = min(start + chunk_size, patch_len)
-            C = end - start  # actual chunk length
-
-            q_chunk = q_patch[:, :, start:end]    # (B, H, C, head_dim)
-            k_chunk = k_context[:, :, start:end]  # (B, H, C, context_len, head_dim)
-            v_chunk = v_context[:, :, start:end]  # (B, H, C, context_len, head_dim)
-            mask_chunk = attn_mask[start:end]      # (C, context_len)
-
-            # Build a block-diagonal mask so query i only attends to its own
-            # context_len keys (columns [i*context_len : (i+1)*context_len]).
-            col_idx = (
-                torch.arange(C, device=q_patch.device)[:, None] * context_len
-                + torch.arange(context_len, device=q_patch.device)[None, :]
-            )  # (C, context_len)
-            block_mask = q_patch.new_full((C, C * context_len), float("-inf"))
-            block_mask.scatter_(1, col_idx, mask_chunk)
-            # block_mask: (C, C*context_len)
-
-            out_chunk = F.scaled_dot_product_attention(
-                q_chunk.reshape(flat, C, head_dim),
-                k_chunk.reshape(flat, C * context_len, head_dim),
-                v_chunk.reshape(flat, C * context_len, head_dim),
-                attn_mask=block_mask,
-                dropout_p=dropout_p,
-            )  # (flat, C, head_dim)
-            outputs.append(out_chunk.reshape(B, num_heads, C, head_dim))
-
-        return torch.cat(outputs, dim=2)  # (B, num_heads, patch_len, head_dim)
+        return out.reshape(batch_size, num_heads, patch_len, head_dim)
 
 
 class StaticSparseViTBlock(nn.Module):
@@ -442,30 +488,25 @@ class StaticSparseViTSlideEncoder(nn.Module):
         if x.dim() == 2:
             x = x.unsqueeze(0)
 
-        B = x.shape[0]
+        batch_size = x.shape[0]
 
         # Project patch embeddings into the transformer's working dimension
-        x = self.input_proj(x)  # (B, patch_len, embed_dim)
+        x = self.input_proj(x)  # (batch_size, patch_len, embed_dim)
 
         # Prepend CLS tokens
-        cls = self.cls_tokens.expand(B, -1, -1)  # (B, num_cls, embed_dim)
-        x = torch.cat([cls, x], dim=1)           # (B, num_cls + patch_len, embed_dim)
+        cls = self.cls_tokens.expand(batch_size, -1, -1)  # (batch_size, num_cls, embed_dim)
+        x = torch.cat([cls, x], dim=1)                    # (batch_size, num_cls + patch_len, embed_dim)
 
         for block in self.blocks:
             x = block(x, coords)
 
         x = self.norm(x)
 
-        cls_tokens = x[:, :self.num_cls]                           # (B, num_cls, embed_dim)
-        weights = torch.softmax(self.cls_pool(cls_tokens), dim=1)  # (B, num_cls, 1)
-        cls_out = (weights * cls_tokens).sum(dim=1)             # (B, embed_dim)
+        cls_tokens = x[:, :self.num_cls]                            # (batch_size, num_cls, embed_dim)
+        weights = torch.softmax(self.cls_pool(cls_tokens), dim=1)   # (batch_size, num_cls, 1)
+        cls_out = (weights * cls_tokens).sum(dim=1)                 # (batch_size, embed_dim)
 
-        logits = self.head(cls_out)  # (B, out_features)
-
-
-        mem = torch.cuda.memory.max_memory_allocated()
-
-        print("max_memory_allocated: ", mem)
+        logits = self.head(cls_out)  # (batch_size, out_features)
 
         return {"logits": logits}
 
