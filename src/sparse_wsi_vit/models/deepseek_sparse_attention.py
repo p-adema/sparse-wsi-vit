@@ -147,8 +147,25 @@ class DeepSeekSparseAttention(nn.Module):
         k = k.unsqueeze(1).expand(-1, self.attention_heads, -1, -1)  # (B, H, T, head_dim)
 
         if coords is not None:
-            q = self.rope(q, coords)
-            k = self.rope(k, coords)
+            num_cls = T - coords.shape[1]
+
+            if num_cls < 0:
+                raise ValueError(
+                    f"coords has more positions ({coords.shape[1]}) than sequence length ({T})"
+                )
+
+            if num_cls > 0:
+                q = torch.cat(
+                    [q[:, :, :num_cls], self.rope(q[:, :, num_cls:], coords)],
+                    dim=2,
+                )
+                k = torch.cat(
+                    [k[:, :, :num_cls], self.rope(k[:, :, num_cls:], coords)],
+                    dim=2,
+                )
+            else:
+                q = self.rope(q, coords)
+                k = self.rope(k, coords)
 
         k = k[:, 0]   # (B, T, head_dim)
 
