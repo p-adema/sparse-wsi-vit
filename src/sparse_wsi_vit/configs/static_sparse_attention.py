@@ -1,4 +1,4 @@
-"""Static Sparse Attention classification config.
+"""SparseViT5 with static sparse attention classification config.
 
 Usage:
     python -m sparse-wsi-vit.experiments.run --config configs/static_sparse_attention_config.py
@@ -15,34 +15,53 @@ from sparse_wsi_vit.experiments.default_cfg import (
 )
 from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
 
-from sparse_wsi_vit.models.static_sparse_attention import StaticSparseViTSlideEncoder
+from sparse_wsi_vit.models.sparse_vit5_slide_encoder import SparseViT5SlideEncoder
 from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import WSIAttnWrapper
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
+
 # ─── Data Details ──────────────────────────────────────────────
-CSV_BASE = Path("../splits/camelyon/0")
-FEATURES_DIR = "../camelyon-emb/"
+CSV_BASE=Path("../splits/camelyon/0")
+FEATURES_DIR="../camelyon-emb/"
 
-# ─── Hyperparameters ─────────────────────────────────────────────
-BATCH_SIZE = 1  # Standard for MIL bags
-NUM_WORKERS = 4
-IN_FEATURES = 1280
-OUT_FEATURES = 1  # Binary task
-PRECISION = "32-true"
-EMBED_DIM = 128
-NUM_HEADS = 2
-NUM_LAYERS = 4
-NUM_CLS = 2
-WINDOW_SIZE = 3
-DILATION = 1
-WORKER_PREFETCH = 2
-CLASS_WEIGHTS = True
+# ─── Sparse attention type ───────────────────────────────────────────────────
+SPARSE_ATTN="static"
 
-WARMUP_ITERATIONS_PERCENTAGE = 0.05
-LEARNING_RATE = 2e-4
-WEIGHT_DECAY = 1e-4
-TRAINING_ITERATIONS = 2000
-GRAD_CLIP = 1.0
-ACCUMULATE_GRAD_STEPS = 10
+# ─── Shared hyperparameters ──────────────────────────────────────────────────
+BATCH_SIZE=1
+NUM_WORKERS=4
+IN_FEATURES=1280
+OUT_FEATURES=1
+# PRECISION="bf16-mixed"
+PRECISION="32-true"
+EMBED_DIM=384
+NUM_HEADS=6            # embed_dim // num_heads=64
+DEPTH=6
+NUM_CLS=4
+
+MLP_RATIO=4.0
+ATTN_DROPOUT=0.0
+PROJ_DROPOUT=0.0
+DROP_PATH_RATE=0.1
+LAYER_SCALE=True
+INIT_SCALE=1e-4
+
+GRADIENT_CHECKPOINTING=True
+
+WARMUP_ITERATIONS_PERCENTAGE=0.05
+LEARNING_RATE=2e-4
+WEIGHT_DECAY=1e-4
+TRAINING_ITERATIONS=2000
+GRAD_CLIP=1.0
+ACCUMULATE_GRAD_STEPS=8
+CLASS_WEIGHTS=True
+WORKER_PREFETCH=2
+
+# ─── StaticSparseAttention-specific ──────────────────────────────────────────
+WINDOW_SIZE=5
+DILATION=1
+CHUNK_SIZE=512
+ROPE_THETA=10_000.0
+ROPE_COORD_HIGH=100_000.0
 
 
 def get_config() -> ExperimentConfig:
@@ -60,22 +79,32 @@ def get_config() -> ExperimentConfig:
         num_workers=NUM_WORKERS,
         class_weights=CLASS_WEIGHTS,
         worker_prefetch=WORKER_PREFETCH,
-        features_name="patches_112x112",
-        coords_name="coords_112x112",
+        features_name="cls_224x224",
+        coords_name="coords_224x224",
     )
 
-    # Network: StaticSparseViTSlideEncoder
-    config.net = LazyConfig(StaticSparseViTSlideEncoder)(
-        in_features    = IN_FEATURES,
-        out_features   = OUT_FEATURES,
-        embed_dim      = EMBED_DIM,
-        num_heads      = NUM_HEADS,
-        num_layers     = NUM_LAYERS,
-        num_cls        = NUM_CLS,
-        window_size    = WINDOW_SIZE,
-        dilation       = DILATION,
-        attn_dropout   = 0.0,
-        proj_dropout   = 0.0,
+    config.net=LazyConfig(SparseViT5SlideEncoder)(
+        in_features=IN_FEATURES,
+        out_features=OUT_FEATURES,
+        embed_dim=EMBED_DIM,
+        num_heads=NUM_HEADS,
+        depth=DEPTH,
+        num_cls=NUM_CLS,
+        sparse_attn=SPARSE_ATTN,
+        # StaticSparseAttention kwargs
+        window_size=WINDOW_SIZE,
+        dilation=DILATION,
+        chunk_size=CHUNK_SIZE,
+        rope_theta=ROPE_THETA,
+        rope_coord_high=ROPE_COORD_HIGH,
+        # Shared kwargs
+        mlp_ratio=MLP_RATIO,
+        attn_dropout=ATTN_DROPOUT,
+        proj_dropout=PROJ_DROPOUT,
+        drop_path_rate=DROP_PATH_RATE,
+        layer_scale=LAYER_SCALE,
+        init_scale=INIT_SCALE,
+        gradient_checkpointing=GRADIENT_CHECKPOINTING,
     )
 
     # Lightning wrapper mappings
@@ -113,7 +142,7 @@ def get_config() -> ExperimentConfig:
     # W&B Logging
     config.wandb = WandbConfig(
         project="wsi-classification",
-        job_group="static_sparse_attention",
+        job_group=f"sparse_vit5_{SPARSE_ATTN}",
         entity="dl2-2026"
     )
 
