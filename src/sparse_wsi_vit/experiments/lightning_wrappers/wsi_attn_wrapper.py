@@ -45,6 +45,18 @@ class WSIAttnWrapper(LightningWrapperBase):
         self.train_acc = torchmetrics.Accuracy(**acc_kwargs)
         self.val_acc = torchmetrics.Accuracy(**acc_kwargs)
 
+        if self.multiclass:
+            prf_kwargs = {
+                "task": "multiclass",
+                "num_classes": network.out_features,
+                "average": "macro",
+            }
+        else:
+            prf_kwargs = {"task": "binary"}
+        self.val_precision = torchmetrics.Precision(**prf_kwargs)
+        self.val_recall = torchmetrics.Recall(**prf_kwargs)
+        self.val_f1 = torchmetrics.F1Score(**prf_kwargs)
+
         self.use_bce_loss = use_bce_loss
         self.training_crop_tokens = training_crop_tokens
         self.eval_crop_tokens = eval_crop_tokens
@@ -159,7 +171,11 @@ class WSIAttnWrapper(LightningWrapperBase):
         torch.cuda.empty_cache()
         self._maybe_crop_batch(batch, self.eval_crop_tokens)
         with torch.inference_mode():
-            loss, _, _ = self._step(batch, self.val_acc)
+            loss, preds, _ = self._step(batch, self.val_acc)
+        labels = batch["label"]
+        self.val_precision.update(preds, labels)
+        self.val_recall.update(preds, labels)
+        self.val_f1.update(preds, labels)
         self.log(
             "val/loss",
             loss,
@@ -171,7 +187,13 @@ class WSIAttnWrapper(LightningWrapperBase):
         return loss
 
     def on_validation_epoch_end(self) -> None:
-        """Log epoch-level validation accuracy and reset the accumulator."""
+        """Log epoch-level validation accuracy, precision, recall and F1, then reset."""
         acc = self.val_acc.compute()
         self.log("val/acc", acc, sync_dist=True)
         self.val_acc.reset()
+        self.log("val/precision", self.val_precision.compute(), sync_dist=True)
+        self.val_precision.reset()
+        self.log("val/recall", self.val_recall.compute(), sync_dist=True)
+        self.val_recall.reset()
+        self.log("val/f1", self.val_f1.compute(), sync_dist=True)
+        self.val_f1.reset()
