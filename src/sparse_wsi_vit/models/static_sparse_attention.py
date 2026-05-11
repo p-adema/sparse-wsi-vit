@@ -8,10 +8,17 @@ import torch.nn.functional as F
 from torch import Tensor
 
 try:
-    from torch.nn.attention.flex_attention import flex_attention, create_block_mask
+    from torch.nn.attention.flex_attention import (
+        flex_attention as _flex_attention_eager,
+        create_block_mask,
+    )
+    # Pre-compile so it always runs as a fused kernel, even when the enclosing
+    # model is not itself wrapped in torch.compile (e.g. during sanity checks).
+    _flex_attention = torch.compile(_flex_attention_eager, dynamic=False, fullgraph=True)
     _FLEX_AVAILABLE = True
 except ImportError:
     _FLEX_AVAILABLE = False
+    _flex_attention = None
 
 
 def _make_sparse_mask_mod(num_cls: int, window_size: int, dilation: int):
@@ -210,9 +217,8 @@ class StaticSparseAttention(nn.Module):
         )
 
         if use_flex:
-            print("using flex attn")
             block_mask = self._get_block_mask(seq_len, x.device)
-            out = flex_attention(q, k, v, block_mask=block_mask)
+            out = _flex_attention(q, k, v, block_mask=block_mask)
         else:
             q_cls, k_cls, v_cls = q[:, :, :num_cls], k[:, :, :num_cls], v[:, :, :num_cls]
             q_patch                = q[:, :, num_cls:]
