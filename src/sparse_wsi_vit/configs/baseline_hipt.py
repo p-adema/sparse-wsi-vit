@@ -61,6 +61,8 @@ def get_config() -> ExperimentConfig:
     config.net = LazyConfig(HIPT_None_FC)(
         in_features=IN_FEATURES,
         out_features=OUT_FEATURES,
+        size_arg="big",
+        # ~2.2M parameters now!
     )
 
     # Lightning wrapper mappings
