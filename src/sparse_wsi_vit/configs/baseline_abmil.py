@@ -59,10 +59,10 @@ def get_config() -> ExperimentConfig:
     # Network: The Standard AB-MIL baseline written natively for 1280-dim CLS tokens
     config.net = LazyConfig(ABMIL)(
         in_features=IN_FEATURES,
-        hidden_dim=2048,
+        hidden_dim=384,
         out_features=OUT_FEATURES,
-        num_branches=20,
-        # ~21.4M parameters now!
+        num_branches=2,
+        # ~2.6M parameters now!
     )
 
     # Lightning wrapper mappings
