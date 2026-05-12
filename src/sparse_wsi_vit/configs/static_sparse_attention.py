@@ -75,7 +75,7 @@ WORKER_PREFETCH=2
 # ─── StaticSparseAttention-specific ──────────────────────────────────────────
 WINDOW_SIZE=5
 DILATION=1
-CHUNK_SIZE=512
+CHUNK_SIZE=4096
 ROPE_THETA=10_000.0
 ROPE_COORD_HIGH=100_000.0
 
