@@ -22,7 +22,7 @@ from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import (
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 
 # ─── Data Details ──────────────────────────────────────────────
-CSV_BASE = "../splits/camelyon/0"
+CSV_BASE = "../splits/camelyon/full"
 FEATURES_DIR = "../camelyon-emb"
 
 # ─── Hyperparameters ─────────────────────────────────────────────
@@ -35,25 +35,25 @@ OUT_FEATURES = 1  # Binary tasks
 PRECISION = "bf16-mixed"
 CHECKPOINT_ACTIVATIONS = True  # instead of cropping
 
-TRAINING_ITERATIONS = 1_000
+TRAINING_ITERATIONS = 5_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
 LEARNING_RATE = 2e-4
 WEIGHT_DECAY = 1e-4
 GRAD_CLIP = 1.0
-ACCUMULATE_GRAD_STEPS = 10
+ACCUMULATE_GRAD_STEPS = 1
 
 
 def get_config() -> ExperimentConfig:
     config = ExperimentConfig()
     config.debug = False  # set to False to actually train
-    config.seed = 42
+    config.seed = 0
 
     # Dataset: Connects to your H5 extraction
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
         train_csv=f"{CSV_BASE}/train.csv",
-        val_csv=f"{CSV_BASE}/val.csv",
+        val_csv=f"{CSV_BASE}/test.csv",
         features_dir=FEATURES_DIR,
-        label_col_name="label",
+        label_col_name="is_tumor",
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
         class_weights=CLASS_WEIGHTS,
@@ -67,6 +67,7 @@ def get_config() -> ExperimentConfig:
         in_features=IN_FEATURES,
         out_features=OUT_FEATURES,
         checkpoint_activations=CHECKPOINT_ACTIVATIONS,
+        downproj=384,  #
     )
 
     # Lightning wrapper mappings

@@ -269,7 +269,7 @@ class vit_models(nn.Module):
         rope=False,
         rope_reg=False,
         rope_dynamic=False,
-        rope_dynamic_high=56,
+        rope_dynamic_high=224,
         num_registers=0,
         qk_norm=False,
         reg_theta=10000,
