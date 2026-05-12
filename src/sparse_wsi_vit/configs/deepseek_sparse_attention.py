@@ -147,7 +147,7 @@ def get_config() -> ExperimentConfig:
     # W&B Logging
     config.wandb = WandbConfig(
         project="wsi-classification",
-        # entity="dl2-2026",
+        entity="dl2-2026",
         job_group="deepseek_sparse_attention",
     )
 
