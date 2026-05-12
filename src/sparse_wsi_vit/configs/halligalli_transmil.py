@@ -55,6 +55,7 @@ def get_config() -> ExperimentConfig:
     config.net = LazyConfig(TransMIL)(
         in_features=IN_FEATURES,
         out_features=OUT_FEATURES,
+        #2M parameters
     )
 
     config.lightning_wrapper_class = LazyConfig(MILWrapper)(

@@ -56,6 +56,7 @@ def get_config() -> ExperimentConfig:
         in_features=IN_FEATURES,
         size_arg="big",
         out_features=OUT_FEATURES,
+        #1.7M parameters
     )
 
     config.lightning_wrapper_class = LazyConfig(MILWrapper)(
