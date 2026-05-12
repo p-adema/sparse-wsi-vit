@@ -54,9 +54,9 @@ def get_config() -> ExperimentConfig:
 
     config.net = LazyConfig(ABMIL)(
         in_features=IN_FEATURES,
-        hidden_dim=256,
+        hidden_dim=384,
         out_features=OUT_FEATURES,
-        num_branches=1,
+        num_branches=2,
     )
 
     config.lightning_wrapper_class = LazyConfig(MILWrapper)(

@@ -54,7 +54,7 @@ def get_config() -> ExperimentConfig:
 
     config.net = LazyConfig(HIPT_None_FC)(
         in_features=IN_FEATURES,
-        size_arg="small",
+        size_arg="big",
         out_features=OUT_FEATURES,
     )
 
