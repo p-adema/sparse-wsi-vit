@@ -34,7 +34,7 @@ OUT_FEATURES = 1  # Binary task
 PRECISION = "bf16-mixed"
 EMBED_DIM=384
 NUM_HEADS=6            # embed_dim // num_heads=64
-DEPTH=6
+DEPTH=12
 NUM_CLS=4
 
 MLP_RATIO=4.0

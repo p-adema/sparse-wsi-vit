@@ -192,6 +192,8 @@ class SparseViT5SlideEncoder(nn.Module):
         if coords is not None and coords.dim() == 2:
             coords = coords.unsqueeze(0)
 
+        print(f"[forward] slide shape: {x.shape}, T={x.shape[1]}", flush=True)
+
         B = x.shape[0]
 
         x = self.input_proj(x)  # (B, N, embed_dim)
