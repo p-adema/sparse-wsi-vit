@@ -12,7 +12,7 @@ from torch.nn.attention.flex_attention import flex_attention, BlockMask
 
 from functools import partial
 
-compiled_flex_attention = torch.compile(partial(flex_attention, kernel_options={"BACKEND": "FLASH"}), dynamic=False)
+compiled_flex_attention = torch.compile(partial(flex_attention, kernel_options={"BACKEND": "FLASH"}), dynamic=True)
 
 
 
@@ -27,23 +27,20 @@ def build_block_mask(
 ) -> BlockMask:
     """Construct BlockMask
 
-    Since chunk_size is a multiple of flex_block_size, chunk boundaries align
-    with flex-block boundaries. We compute which query blocks attend to which
-    KV blocks directly.  The mask_mod is passed through for fine-grained
-    masking within blocks (needed for the first block that mixes CLS and patch
-    tokens).
+    Chunks are defined from position 0 (not from num_cls), so chunk boundaries
+    land on exact multiples of chunk_size — which is itself a multiple of
+    flex_block_size. This guarantees perfect alignment between logical chunks
+    and FlexAttention kernel tiles.
+
+    CLS tokens occupy the first positions of chunk 0.  The mask_mod handles
+    fine-grained masking: CLS attends globally, patches attend to CLS +
+    chunks within the window.
     """
     num_blocks = (seq_len + flex_block_size - 1) // flex_block_size
-    patch_len = seq_len - num_cls
-    num_chunks = (patch_len + chunk_size - 1) // chunk_size if patch_len > 0 else 0
+    blocks_per_chunk = chunk_size // flex_block_size
+    num_chunks = (seq_len + chunk_size - 1) // chunk_size
 
     num_cls_flex_blocks = (num_cls + flex_block_size - 1) // flex_block_size if num_cls > 0 else 0
-
-    chunk_flex_ranges: list[tuple[int, int]] = []
-    for c in range(num_chunks):
-        start = (num_cls + c * chunk_size) // flex_block_size
-        end = min((num_cls + (c + 1) * chunk_size - 1) // flex_block_size, num_blocks - 1)
-        chunk_flex_ranges.append((start, end))
 
     all_kv_lists: list[list[int]] = []
     for qb in range(num_blocks):
@@ -56,18 +53,15 @@ def build_block_mask(
             for cb in range(num_cls_flex_blocks):
                 kv_set.add(cb)
 
-            patch_start = q_start - num_cls
-            patch_end = min((qb + 1) * flex_block_size, seq_len) - 1 - num_cls
-            chunk_start = patch_start // chunk_size
-            chunk_end = min(patch_end // chunk_size, num_chunks - 1)
-
-            win_lo = max(0, chunk_start - window_size)
-            win_hi = min(num_chunks - 1, chunk_end + window_size)
+            q_chunk = qb // blocks_per_chunk
+            win_lo = max(0, q_chunk - window_size)
+            win_hi = min(num_chunks - 1, q_chunk + window_size)
 
             for c in range(win_lo, win_hi + 1):
-                s, e = chunk_flex_ranges[c]
-                for b in range(s, e + 1):
-                    kv_set.add(b)
+                fb_start = c * blocks_per_chunk
+                fb_end = min((c + 1) * blocks_per_chunk, num_blocks)
+                for fb in range(fb_start, fb_end):
+                    kv_set.add(fb)
 
             kv_list = sorted(kv_set)
 
@@ -90,6 +84,7 @@ def build_block_mask(
         full_kv_indices=None,
         BLOCK_SIZE=(flex_block_size, flex_block_size),
         mask_mod=mask_mod,
+        seq_lengths=(seq_len, seq_len),
     )
 
 
@@ -282,8 +277,8 @@ class StaticSparseAttention(nn.Module):
         def mask_mod(b, h, q_idx, kv_idx):
             q_is_cls = q_idx < num_cls
             kv_is_cls = kv_idx < num_cls
-            q_chunk = (q_idx - num_cls) // chunk_size
-            kv_chunk = (kv_idx - num_cls) // chunk_size
+            q_chunk = q_idx // chunk_size
+            kv_chunk = kv_idx // chunk_size
             in_window = (q_chunk - kv_chunk).abs() <= window_size
             return q_is_cls | kv_is_cls | in_window
 
