@@ -22,6 +22,7 @@ from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDat
 
 # ─── Data Details ──────────────────────────────────────────────
 CSV_BASE=Path("../splits/camelyon/0")
+# CSV_BASE=Path("../splits/camelyon/full")
 FEATURES_DIR="../camelyon-emb/"
 
 
@@ -47,11 +48,11 @@ BATCH_SIZE=1
 NUM_WORKERS=4
 IN_FEATURES=1280
 OUT_FEATURES=1
-# PRECISION="bf16-mixed"
-PRECISION="32-true"
+PRECISION="bf16-mixed"
+# PRECISION="32-true"
 EMBED_DIM=384
 NUM_HEADS=6            # embed_dim // num_heads=64
-DEPTH=6
+DEPTH=12
 NUM_CLS=4
 
 MLP_RATIO=4.0
@@ -75,7 +76,8 @@ WORKER_PREFETCH=2
 # ─── StaticSparseAttention-specific ──────────────────────────────────────────
 WINDOW_SIZE=5
 DILATION=1
-CHUNK_SIZE=4096
+CHUNK_SIZE=512
+# CHUNK_SIZE=4096
 ROPE_THETA=10_000.0
 ROPE_COORD_HIGH=100_000.0
 
@@ -89,8 +91,10 @@ def get_config() -> ExperimentConfig:
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
         train_csv=f"{CSV_BASE}/train.csv",
         val_csv=f"{CSV_BASE}/val.csv",
+        # val_csv=f"{CSV_BASE}/test.csv",
         features_dir=FEATURES_DIR,
         label_col_name="label",
+        # label_col_name="is_tumor",
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
         class_weights=CLASS_WEIGHTS,
