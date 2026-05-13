@@ -55,6 +55,7 @@ class WandbConfig:
     entity: str = ""
 
     job_group: str = ""
+    name: str = ""
 
 
 @dataclass

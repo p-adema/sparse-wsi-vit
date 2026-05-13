@@ -26,13 +26,14 @@ DOWNSCALE_BLOCK = 1
 
 # ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1
-NUM_WORKERS = 4
-WORKER_PREFETCH = 10
+NUM_WORKERS = 8  # Actually, if you use the 224 features, it fits into RAM, no disk use
+WORKER_PREFETCH = 5
 CLASS_WEIGHTS = True
 IN_FEATURES = 1280
 OUT_FEATURES = 1  # Binary tasks
 PRECISION = "bf16-mixed"
 CHECKPOINT_ACTIVATIONS = True
+ROPE_DYNAMIC_HIGH = 100_000
 
 TRAINING_ITERATIONS = 1_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
@@ -68,6 +69,7 @@ def get_config() -> ExperimentConfig:
         out_features=OUT_FEATURES,
         checkpoint_activations=CHECKPOINT_ACTIVATIONS,
         downproj=384,
+        rope_dynamic_high=ROPE_DYNAMIC_HIGH,
     )
 
     # Lightning wrapper mappings

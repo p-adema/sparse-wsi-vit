@@ -28,6 +28,7 @@ class VitDensePreEmbedded(nn.Module):
         out_features: int = 1,
         checkpoint_activations=False,
         downproj: int | None = None,
+        rope_dynamic_high=100_000,
     ):
         super().__init__()
         self.out_features = out_features
@@ -47,6 +48,7 @@ class VitDensePreEmbedded(nn.Module):
             # num_heads=8,
             depth=6,
             checkpoint_activations=checkpoint_activations,
+            rope_dynamic_high=rope_dynamic_high,
         )
         self.down = nn.Linear(in_features, downproj) if downproj else None
 
