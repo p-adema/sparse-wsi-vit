@@ -10,7 +10,10 @@ import torch.nn as nn
 from torch import Tensor
 from torch.nn.attention.flex_attention import flex_attention, BlockMask
 
-compiled_flex_attention = torch.compile(flex_attention)
+from functools import partial
+
+compiled_flex_attention = torch.compile(partial(flex_attention, kernel_options={"BACKEND": "FLASH"}), dynamic=False)
+
 
 
 def build_block_mask(
@@ -80,7 +83,7 @@ def build_block_mask(
         for i, kvb in enumerate(kv_list):
             kv_indices[0, 0, qb, i] = kvb
 
-    return BlockMask(
+    return BlockMask.from_kv_blocks(
         kv_num_blocks=kv_num_blocks,
         kv_indices=kv_indices,
         full_kv_num_blocks=None,
