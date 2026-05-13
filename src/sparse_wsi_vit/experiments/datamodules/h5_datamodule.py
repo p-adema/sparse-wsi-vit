@@ -69,6 +69,7 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         features_name: str = "features",
         coords_name: str = "coords",
         flatten_block: bool = True,
+        downscale_block: int = 1,
         output_channels: int = 1,
     ):
         super().__init__()
@@ -84,6 +85,7 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         self.features_name = features_name
         self.coords_name = coords_name
         self.flatten_block = flatten_block
+        self.downscale_block = downscale_block
         self.output_channels = output_channels
 
     def setup(self, stage: str | None = None) -> None:
@@ -101,6 +103,7 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
                 features_name=self.features_name,
                 coords_name=self.coords_name,
                 flatten_block=self.flatten_block,
+                downscale_block=self.downscale_block,
             )
             self.val_dataset = H5FeatureBagDataset(
                 csv_path=self.val_csv,
@@ -109,6 +112,7 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
                 features_name=self.features_name,
                 coords_name=self.coords_name,
                 flatten_block=self.flatten_block,
+                downscale_block=self.downscale_block,
             )
 
     def train_dataloader(self) -> DataLoader:
