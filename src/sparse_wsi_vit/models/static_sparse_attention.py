@@ -5,15 +5,17 @@ Uses FlexAttention with a static block mask: CLS tokens attend globally,
 patch tokens attend to CLS + spatially nearby chunks (Hilbert-ordered).
 """
 
+from functools import partial
+
 import torch
 import torch.nn as nn
 from torch import Tensor
 from torch.nn.attention.flex_attention import flex_attention, BlockMask
 
-from functools import partial
-
-compiled_flex_attention = torch.compile(partial(flex_attention, kernel_options={"BACKEND": "FLASH"}), dynamic=True)
-
+compiled_flex_attention = torch.compile(
+    partial(flex_attention, kernel_options={"BACKEND": "TRITON"}),
+    dynamic=True,
+)
 
 
 def build_block_mask(
