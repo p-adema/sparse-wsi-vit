@@ -323,13 +323,15 @@ class HalliGalliGenerator:
 # ── visualisation ─────────────────────────────────────────────────────
 
 
-def _show_samples(n=8, highlight=True, **kwargs):
+def _show_samples(n=8, highlight=True, image_only=False, **kwargs):
     """Render a row of samples with optional highlight circles on key shapes.
 
     When *highlight* is True, each of the four key shapes is circled.
     If the sample is positive (label=1), the two shapes forming the
     matching pair are circled in green; the two non-matching shapes
     in yellow.  For negative samples, all four are circled in yellow.
+
+    When *image_only* is True, only the images are shown (no text panel).
     """
     try:
         import matplotlib.pyplot as plt
@@ -338,7 +340,38 @@ def _show_samples(n=8, highlight=True, **kwargs):
         print("matplotlib not available")
         return
 
-    fig, axes = plt.subplots(2, n, figsize=(2.8 * n, 6.0))
+    if image_only:
+        for j in range(n):
+            img, lbl, shapes, positions = HalliGalliGenerator.generate_single(**kwargs)
+            fig, ax = plt.subplots(1, 1, figsize=(4, 4))
+            ax.imshow(img)
+            ax.axis("off")
+
+            if highlight:
+                counts = Counter(shapes)
+                repeated = {s for s, k in counts.items() if k >= 2}
+                pair_idx = (
+                    {i for i, s in enumerate(shapes) if s in repeated}
+                    if lbl == 1
+                    else set()
+                )
+                H = img.shape[0]
+                r = kwargs.get("shape_radius") or max(3, int(H * 0.008))
+                hi_r = max(r * 2.5, 8)
+                for i, (cy, cx) in enumerate(positions):
+                    color = "lime" if i in pair_idx else "yellow"
+                    ax.add_patch(Circle((cx, cy), hi_r, fill=False,
+                                        edgecolor=color, linewidth=1.8))
+
+            fname = f"halligalli_{j}_label{lbl}.pdf"
+            fig.tight_layout(pad=0)
+            plt.savefig(fname, dpi=600, bbox_inches="tight")
+            plt.close(fig)
+            print(f"Saved {fname}")
+        return
+
+    n_rows = 2
+    fig, axes = plt.subplots(n_rows, n, figsize=(2.8 * n, 6.0))
     if n == 1:
         axes = axes[:, None]
 
@@ -357,21 +390,14 @@ def _show_samples(n=8, highlight=True, **kwargs):
         )
 
         if highlight:
-            # radius of the highlight circle, scaled to image size
             H = img.shape[0]
             r = kwargs.get("shape_radius") or max(3, int(H * 0.008))
             hi_r = max(r * 2.5, 8)
-
             for i, (cy, cx) in enumerate(positions):
                 color = "lime" if i in pair_idx else "yellow"
                 axes[0, j].add_patch(
-                    Circle(
-                        (cx, cy),
-                        hi_r,
-                        fill=False,
-                        edgecolor=color,
-                        linewidth=1.8,
-                    )
+                    Circle((cx, cy), hi_r, fill=False,
+                           edgecolor=color, linewidth=1.8)
                 )
 
         txt_lines = [
@@ -379,25 +405,12 @@ def _show_samples(n=8, highlight=True, **kwargs):
             for i, s in enumerate(shapes)
         ]
         axes[1, j].text(
-            0.05,
-            0.5,
-            "\n".join(txt_lines),
-            fontsize=8,
-            family="monospace",
-            verticalalignment="center",
+            0.05, 0.5, "\n".join(txt_lines),
+            fontsize=8, family="monospace", verticalalignment="center",
             transform=axes[1, j].transAxes,
         )
         axes[1, j].axis("off")
 
-    cd = kwargs.get("clutter_density", 15)
-    r = kwargs.get("shape_radius", None)
-    sz = kwargs.get("image_size", 64)
-    r_eff = r if r else max(3, int(sz * 0.008))
-    fig.suptitle(
-        f"HalliGalli  (size={sz}, r={r_eff}, clutter={cd})",
-        fontsize=11,
-        y=1.01,
-    )
     fig.tight_layout()
     plt.savefig("halligalli_samples.pdf", dpi=600, bbox_inches="tight")
     plt.show()
@@ -429,13 +442,23 @@ if __name__ == "__main__":
         action="store_true",
         help="Disable highlight circles on key shapes (--visualize only)",
     )
+    parser.add_argument(
+        "--image_only",
+        action="store_true",
+        help="Show only images, no text panel below (--visualize only)",
+    )
     args = parser.parse_args()
 
     kw = {
         k: v
         for k, v in vars(args).items()
-        if k not in ("visualize", "n_samples", "no_highlight")
+        if k not in ("visualize", "n_samples", "no_highlight", "image_only")
     }
 
     if args.visualize:
-        _show_samples(n=args.n_samples, highlight=not args.no_highlight, **kw)
+        _show_samples(
+            n=args.n_samples,
+            highlight=not args.no_highlight,
+            image_only=args.image_only,
+            **kw,
+        )
