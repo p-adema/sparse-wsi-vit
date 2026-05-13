@@ -10,6 +10,8 @@ import torch.nn as nn
 from torch import Tensor
 from torch.nn.attention.flex_attention import flex_attention, create_block_mask
 
+compiled_flex_attention = torch.compile(flex_attention)
+
 
 def _rotate_half(x: Tensor) -> Tensor:
     """Rotate adjacent pairs: [..., x1, x2, ...] → [..., -x2, x1, ...]."""
@@ -194,7 +196,6 @@ class StaticSparseAttention(nn.Module):
             q = torch.cat([q[:, :, :num_cls], self.rope(q[:, :, num_cls:], coords)], dim=2)
             k = torch.cat([k[:, :, :num_cls], self.rope(k[:, :, num_cls:], coords)], dim=2)
 
-
         def mask_mod(b, h, q_idx, kv_idx):
             q_is_cls = q_idx < num_cls
             kv_is_cls = kv_idx < num_cls
@@ -207,7 +208,7 @@ class StaticSparseAttention(nn.Module):
             mask_mod, B=None, H=None, Q_LEN=seq_len, KV_LEN=seq_len,
             device=x.device, BLOCK_SIZE=self.flex_block_size,
         )
-        out = flex_attention(q, k, v, block_mask=block_mask)
+        out = compiled_flex_attention(q, k, v, block_mask=block_mask)
 
         out = out.transpose(1, 2).reshape(batch_size, seq_len, embed_dim)
         return self.out_proj(out)
@@ -371,10 +372,13 @@ class StaticSparseViTSlideEncoder(nn.Module):
         x = self.norm(x)
 
         cls_tokens = x[:, :self.num_cls]
-        weights = torch.softmax(self.cls_pool(cls_tokens), dim=1)
-        cls_out = (weights * cls_tokens).sum(dim=1)
+        cls_pool_weights = torch.softmax(self.cls_pool(cls_tokens), dim=1)
+        cls_out = (cls_pool_weights * cls_tokens).sum(dim=1)
 
-        return {"logits": self.head(cls_out)}
+        return {
+            "logits": self.head(cls_out),
+            "cls_pool_weights": cls_pool_weights,
+        }
 
 class StaticSparseAttentionAdapter(nn.Module):
     """Adapts StaticSparseAttention to the ViT-5 Block ``Attention_block`` API.
