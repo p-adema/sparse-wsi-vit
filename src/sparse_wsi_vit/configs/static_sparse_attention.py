@@ -22,14 +22,14 @@ from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDat
 from sparse_wsi_vit.experiments.callbacks import AttentionMapCallback
 
 # ─── Data Details ──────────────────────────────────────────────
-CSV_BASE=Path("../splits/camelyon/0")
+CSV_BASE=Path("../splits/camelyon/full")
 # CSV_BASE=Path("../splits/camelyon/full")
 FEATURES_DIR="../camelyon-emb/"
 
 
 train_csv = str(CSV_BASE / "train.csv")
 print(f"{train_csv=}")
-val_csv = str(CSV_BASE / "val.csv")
+val_csv = str(CSV_BASE / "test.csv")
 print(f"{val_csv=}")
 
 train_slides = set(pd.read_csv(train_csv)["slidename"])
@@ -91,17 +91,17 @@ def get_config() -> ExperimentConfig:
     # Dataset: Connects to your H5 extraction
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
         train_csv=f"{CSV_BASE}/train.csv",
-        val_csv=f"{CSV_BASE}/val.csv",
-        # val_csv=f"{CSV_BASE}/test.csv",
+        # val_csv=f"{CSV_BASE}/val.csv",
+        val_csv=f"{CSV_BASE}/test.csv",
         features_dir=FEATURES_DIR,
-        label_col_name="label",
-        # label_col_name="is_tumor",
+        # label_col_name="label",
+        label_col_name="is_tumor",
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
         class_weights=CLASS_WEIGHTS,
         worker_prefetch=WORKER_PREFETCH,
-        features_name="cls_224x224",
-        coords_name="coords_224x224",
+        features_name="patches_112x112",
+        coords_name="coords_112x112",
     )
 
     config.net=LazyConfig(SparseViT5SlideEncoder)(
