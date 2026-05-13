@@ -102,7 +102,7 @@ class WSIAttnWrapper(LightningWrapperBase):
             loss *= batch["class_weight"]
 
         accuracy_calculator.update(preds, labels)
-        return loss, preds, {"logits": logits}
+        return loss, preds, output_dict
 
     def training_step(
             self, batch: dict[str, torch.Tensor], batch_idx: int
@@ -119,15 +119,19 @@ class WSIAttnWrapper(LightningWrapperBase):
         gc.collect()
         torch.cuda.empty_cache()
         self._maybe_crop_batch(batch, self.training_crop_tokens)
-        loss, _, _ = self._step(batch, self.train_acc)
+        loss, _, output_dict = self._step(batch, self.train_acc)
+        batch_size = batch["input"].size(0)
         self.log(
             "train/loss",
             loss,
             on_step=True,
             on_epoch=True,
             sync_dist=True,
-            batch_size=batch["input"].size(0),
+            batch_size=batch_size,
         )
+        logits = output_dict["logits"].squeeze(1)
+        self.log("train/logits_mean", logits.mean(), batch_size=batch_size)
+        self.log("train/logits_std", logits.std(), batch_size=batch_size)
         return loss
 
     def _maybe_crop_batch(self, batch: dict[str, Tensor], crop_tokens: int | None):
@@ -171,8 +175,9 @@ class WSIAttnWrapper(LightningWrapperBase):
         torch.cuda.empty_cache()
         self._maybe_crop_batch(batch, self.eval_crop_tokens)
         with torch.inference_mode():
-            loss, preds, _ = self._step(batch, self.val_acc)
+            loss, preds, output_dict = self._step(batch, self.val_acc)
         labels = batch["label"]
+        batch_size = batch["input"].size(0)
         self.val_precision.update(preds, labels)
         self.val_recall.update(preds, labels)
         self.val_f1.update(preds, labels)
@@ -182,8 +187,11 @@ class WSIAttnWrapper(LightningWrapperBase):
             on_step=False,
             on_epoch=True,
             sync_dist=True,
-            batch_size=batch["input"].size(0),
+            batch_size=batch_size,
         )
+        logits = output_dict["logits"].squeeze(1)
+        self.log("val/logits_mean", logits.mean(), on_epoch=True, batch_size=batch_size)
+        self.log("val/logits_std", logits.std(), on_epoch=True, batch_size=batch_size)
         return loss
 
     def on_validation_epoch_end(self) -> None:
