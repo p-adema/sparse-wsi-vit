@@ -131,7 +131,8 @@ class WSIAttnWrapper(LightningWrapperBase):
         )
         logits = output_dict["logits"].squeeze(1)
         self.log("train/logits_mean", logits.mean(), batch_size=batch_size)
-        self.log("train/logits_std", logits.std(), batch_size=batch_size)
+        if logits.numel() > 1:
+            self.log("train/logits_std", logits.std(), batch_size=batch_size)
         return loss
 
     def _maybe_crop_batch(self, batch: dict[str, Tensor], crop_tokens: int | None):
@@ -191,7 +192,8 @@ class WSIAttnWrapper(LightningWrapperBase):
         )
         logits = output_dict["logits"].squeeze(1)
         self.log("val/logits_mean", logits.mean(), on_epoch=True, batch_size=batch_size)
-        self.log("val/logits_std", logits.std(), on_epoch=True, batch_size=batch_size)
+        if logits.numel() > 1:
+            self.log("val/logits_std", logits.std(), on_epoch=True, batch_size=batch_size)
         return loss
 
     def on_validation_epoch_end(self) -> None:

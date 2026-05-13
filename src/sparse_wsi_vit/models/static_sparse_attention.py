@@ -8,9 +8,86 @@ patch tokens attend to CLS + spatially nearby chunks (Hilbert-ordered).
 import torch
 import torch.nn as nn
 from torch import Tensor
-from torch.nn.attention.flex_attention import flex_attention, create_block_mask
+from torch.nn.attention.flex_attention import flex_attention, BlockMask
 
 compiled_flex_attention = torch.compile(flex_attention)
+
+
+def build_block_mask(
+    seq_len: int,
+    num_cls: int,
+    chunk_size: int,
+    window_size: int,
+    flex_block_size: int,
+    device: torch.device,
+    mask_mod,
+) -> BlockMask:
+    """Construct BlockMask
+
+    Since chunk_size is a multiple of flex_block_size, chunk boundaries align
+    with flex-block boundaries. We compute which query blocks attend to which
+    KV blocks directly.  The mask_mod is passed through for fine-grained
+    masking within blocks (needed for the first block that mixes CLS and patch
+    tokens).
+    """
+    num_blocks = (seq_len + flex_block_size - 1) // flex_block_size
+    patch_len = seq_len - num_cls
+    num_chunks = (patch_len + chunk_size - 1) // chunk_size if patch_len > 0 else 0
+
+    num_cls_flex_blocks = (num_cls + flex_block_size - 1) // flex_block_size if num_cls > 0 else 0
+
+    chunk_flex_ranges: list[tuple[int, int]] = []
+    for c in range(num_chunks):
+        start = (num_cls + c * chunk_size) // flex_block_size
+        end = min((num_cls + (c + 1) * chunk_size - 1) // flex_block_size, num_blocks - 1)
+        chunk_flex_ranges.append((start, end))
+
+    all_kv_lists: list[list[int]] = []
+    for qb in range(num_blocks):
+        q_start = qb * flex_block_size
+
+        if q_start < num_cls:
+            kv_list = list(range(num_blocks))
+        else:
+            kv_set: set[int] = set()
+            for cb in range(num_cls_flex_blocks):
+                kv_set.add(cb)
+
+            patch_start = q_start - num_cls
+            patch_end = min((qb + 1) * flex_block_size, seq_len) - 1 - num_cls
+            chunk_start = patch_start // chunk_size
+            chunk_end = min(patch_end // chunk_size, num_chunks - 1)
+
+            win_lo = max(0, chunk_start - window_size)
+            win_hi = min(num_chunks - 1, chunk_end + window_size)
+
+            for c in range(win_lo, win_hi + 1):
+                s, e = chunk_flex_ranges[c]
+                for b in range(s, e + 1):
+                    kv_set.add(b)
+
+            kv_list = sorted(kv_set)
+
+        all_kv_lists.append(kv_list)
+
+    max_kv = max(len(kv) for kv in all_kv_lists)
+
+    kv_num_blocks = torch.zeros(1, 1, num_blocks, dtype=torch.int32, device=device)
+    kv_indices = torch.zeros(1, 1, num_blocks, max_kv, dtype=torch.int32, device=device)
+
+    for qb, kv_list in enumerate(all_kv_lists):
+        kv_num_blocks[0, 0, qb] = len(kv_list)
+        for i, kvb in enumerate(kv_list):
+            kv_indices[0, 0, qb, i] = kvb
+
+    return BlockMask(
+        kv_num_blocks=kv_num_blocks,
+        kv_indices=kv_indices,
+        full_kv_num_blocks=None,
+        full_kv_indices=None,
+        BLOCK_SIZE=(flex_block_size, flex_block_size),
+        mask_mod=mask_mod,
+    )
 
 
 def _rotate_half(x: Tensor) -> Tensor:
@@ -196,17 +273,20 @@ class StaticSparseAttention(nn.Module):
             q = torch.cat([q[:, :, :num_cls], self.rope(q[:, :, num_cls:], coords)], dim=2)
             k = torch.cat([k[:, :, :num_cls], self.rope(k[:, :, num_cls:], coords)], dim=2)
 
+        chunk_size = self.chunk_size
+        window_size = self.window_size
+
         def mask_mod(b, h, q_idx, kv_idx):
             q_is_cls = q_idx < num_cls
             kv_is_cls = kv_idx < num_cls
-            q_chunk = (q_idx - num_cls) // self.chunk_size
-            kv_chunk = (kv_idx - num_cls) // self.chunk_size
-            in_window = (q_chunk - kv_chunk).abs() <= self.window_size
+            q_chunk = (q_idx - num_cls) // chunk_size
+            kv_chunk = (kv_idx - num_cls) // chunk_size
+            in_window = (q_chunk - kv_chunk).abs() <= window_size
             return q_is_cls | kv_is_cls | in_window
 
-        block_mask = create_block_mask(
-            mask_mod, B=None, H=None, Q_LEN=seq_len, KV_LEN=seq_len,
-            device=x.device, BLOCK_SIZE=self.flex_block_size,
+        block_mask = build_block_mask(
+            seq_len, num_cls, chunk_size, window_size,
+            self.flex_block_size, x.device, mask_mod,
         )
         out = compiled_flex_attention(q, k, v, block_mask=block_mask)
 
