@@ -12,7 +12,10 @@ from torch import Tensor
 from torch.utils.checkpoint import checkpoint
 
 from sparse_wsi_vit.models.vit_5.models_vit5 import Block, RMSNorm
-from sparse_wsi_vit.models.static_sparse_attention import StaticSparseAttentionAdapter
+from sparse_wsi_vit.models.static_sparse_attention import (
+    StaticSparseAttentionAdapter,
+    hilbert_sort,
+)
 
 
 _SPARSE_ATTN_TYPES = ("static")
@@ -37,15 +40,14 @@ class SparseViT5SlideEncoder(nn.Module):
         sparse_attn: Which sparse attention to use — ``"static"`` or ``"dsa"``.
 
         StaticSparseAttention kwargs (active when ``sparse_attn="static"``):
-            window_size: One-sided local window radius (0 = CLS-only).
-            dilation: Step size between attended window patches.
-            chunk_size: Patch chunk size forwarded to the windowed SDPA path.
+            window_size: Neighbouring chunks on each side for patch attention.
+            chunk_size: Patches per logical chunk (must be multiple of flex_block_size).
+            flex_block_size: FlexAttention kernel tile size (128 for H100).
             rope_theta: RoPE base frequency.
             rope_coord_high: Coordinate normalisation divisor for 2-D RoPE.
 
         Shared transformer kwargs:
             mlp_ratio: MLP hidden-dim expansion factor.
-            attn_dropout: Dropout on attention weights.
             proj_dropout: Dropout after projections.
             drop_path_rate: Stochastic-depth drop probability (same for all layers).
 
@@ -67,14 +69,13 @@ class SparseViT5SlideEncoder(nn.Module):
         num_cls: int = 2,
         sparse_attn: str = "static",
         # StaticSparseAttention kwargs
-        window_size: int = 3,
-        dilation: int = 1,
-        chunk_size: int = 512,
+        window_size: int = 1,
+        chunk_size: int = 256,
+        flex_block_size: int = 128,
         rope_theta: float = 10_000.0,
         rope_coord_high: float = 100_000.0,
         # Shared transformer kwargs
         mlp_ratio: float = 4.0,
-        attn_dropout: float = 0.0,
         proj_dropout: float = 0.0,
         drop_path_rate: float = 0.0,
         # ViT-5 Block kwargs
@@ -82,6 +83,8 @@ class SparseViT5SlideEncoder(nn.Module):
         init_scale: float = 1e-4,
         # Memory
         gradient_checkpointing: bool = False,
+        # patch_ordering
+        use_hilbert_sort = False
     ) -> None:
         super().__init__()
 
@@ -95,6 +98,7 @@ class SparseViT5SlideEncoder(nn.Module):
         self.embed_dim = embed_dim
         self.out_features = out_features
         self.gradient_checkpointing = gradient_checkpointing
+        self.use_hilbert_sort = use_hilbert_sort
 
         self.input_proj = nn.Linear(in_features, embed_dim)
         nn.init.xavier_uniform_(self.input_proj.weight)
@@ -109,8 +113,8 @@ class SparseViT5SlideEncoder(nn.Module):
             sparse_kwargs: dict = dict(
                 num_cls=num_cls,
                 window_size=window_size,
-                dilation=dilation,
                 chunk_size=chunk_size,
+                flex_block_size=flex_block_size,
                 rope_theta=rope_theta,
                 rope_coord_high=rope_coord_high,
             )
@@ -126,7 +130,6 @@ class SparseViT5SlideEncoder(nn.Module):
                 mlp_ratio=mlp_ratio,
                 qkv_bias=False,
                 drop=proj_dropout,
-                attn_drop=attn_dropout,
                 drop_path=drop_path_rate,
                 norm_layer=norm_layer,
                 Attention_block=attn_block,
@@ -154,25 +157,30 @@ class SparseViT5SlideEncoder(nn.Module):
         """Encode a bag of pre-extracted patch embeddings into a slide-level prediction.
 
         Args:
-            x: Patch embeddings ``(B, N, in_features)`` or ``(N, in_features)``
-               (batch dimension added automatically for single slides).
-            coords: Pixel coordinates ``(B, N, 2)``.  Used by the static sparse
-                attention variant for 2-D RoPE; passed but ignored by DSA.
+            x: Patch embeddings ``(batch_size, patch_len, in_features)`` or
+               ``(patch_len, in_features)`` (batch dimension added automatically).
+            coords: Pixel coordinates ``(batch_size, patch_len, 2)``.  Used by
+                the static sparse attention variant for 2-D RoPE.
 
         Returns:
-            Dict with ``"logits"`` key, shape ``(B, out_features)``.
+            Dict with ``"logits"`` key, shape ``(batch_size, out_features)``.
         """
         if x.dim() == 2:
             x = x.unsqueeze(0)
         if coords is not None and coords.dim() == 2:
             coords = coords.unsqueeze(0)
 
-        B = x.shape[0]
+        batch_size = x.shape[0]
 
-        x = self.input_proj(x)  # (B, N, embed_dim)
+        x = self.input_proj(x)  # (batch_size, patch_len, embed_dim)
 
-        cls = self.cls_tokens.expand(B, -1, -1)  # (B, num_cls, embed_dim)
-        x = torch.cat([cls, x], dim=1)            # (B, num_cls + N, embed_dim)
+        if coords is not None and self.use_hilbert_sort:
+            sort_idx = hilbert_sort(coords)
+            x = x.gather(1, sort_idx.unsqueeze(-1).expand_as(x))
+            coords = coords.gather(1, sort_idx.unsqueeze(-1).expand(-1, -1, 2))
+
+        cls = self.cls_tokens.expand(batch_size, -1, -1)  # (batch_size, num_cls, embed_dim)
+        x = torch.cat([cls, x], dim=1)                     # (batch_size, num_cls + patch_len, embed_dim)
 
         for block in self.blocks:
             if self.gradient_checkpointing and self.training:
@@ -182,8 +190,8 @@ class SparseViT5SlideEncoder(nn.Module):
 
         x = self.norm(x)
 
-        cls_tokens = x[:, : self.num_cls]                          # (B, num_cls, embed_dim)
-        weights = torch.softmax(self.cls_pool(cls_tokens), dim=1)  # (B, num_cls, 1)
-        cls_pooled = (weights * cls_tokens).sum(dim=1)             # (B, embed_dim)
+        cls_tokens = x[:, : self.num_cls]                          # (batch_size, num_cls, embed_dim)
+        weights = torch.softmax(self.cls_pool(cls_tokens), dim=1)  # (batch_size, num_cls, 1)
+        cls_pooled = (weights * cls_tokens).sum(dim=1)             # (batch_size, embed_dim)
 
         return {"logits": self.head(cls_pooled)}

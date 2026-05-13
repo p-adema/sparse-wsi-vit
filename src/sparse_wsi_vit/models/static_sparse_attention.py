@@ -1,11 +1,14 @@
 """
-Approach A: Static sparse attention for WSI slide encoding.
+Approach A: Block-sparse static attention for WSI slide encoding.
+
+Uses FlexAttention with a static block mask: CLS tokens attend globally,
+patch tokens attend to CLS + spatially nearby chunks (Hilbert-ordered).
 """
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch import Tensor
+from torch.nn.attention.flex_attention import flex_attention, create_block_mask
 
 
 def _rotate_half(x: Tensor) -> Tensor:
@@ -13,6 +16,46 @@ def _rotate_half(x: Tensor) -> Tensor:
     x1 = x[..., 0::2]
     x2 = x[..., 1::2]
     return torch.stack([-x2, x1], dim=-1).flatten(-2)
+
+
+def hilbert_sort(coords: Tensor) -> Tensor:
+    """Sort patches by 2-D Hilbert curve so spatially nearby patches are contiguous.
+
+    Args:
+        coords: ``(B, N, 2)`` pixel coordinates.
+
+    Returns:
+        ``(B, N)`` indices that reorder patches along the Hilbert curve.
+    """
+    B, N, _ = coords.shape
+    bits = 16
+    grid_size = 1 << bits
+
+    cmin = coords.amin(dim=1, keepdim=True)
+    cmax = coords.amax(dim=1, keepdim=True)
+    span = (cmax - cmin).clamp(min=1).float()
+    norm = ((coords - cmin).float() / span * (grid_size - 1)).long()
+
+    x = norm[..., 0].clone()
+    y = norm[..., 1].clone()
+    d = torch.zeros(B, N, dtype=torch.long, device=coords.device)
+
+    s = grid_size >> 1
+    while s > 0:
+        rx = ((x & s) > 0).long()
+        ry = ((y & s) > 0).long()
+        d += s * s * ((3 * rx) ^ ry)
+        no_ry = ry == 0
+        flip = no_ry & (rx == 1)
+        x = torch.where(flip, s - 1 - x, x)
+        y = torch.where(flip, s - 1 - y, y)
+        x_new = torch.where(no_ry, y, x)
+        y_new = torch.where(no_ry, x, y)
+        x, y = x_new, y_new
+        s >>= 1
+
+    return d.argsort(dim=1)
+
 
 
 class Rope2D(nn.Module):
@@ -75,35 +118,25 @@ class Rope2D(nn.Module):
 
 
 class StaticSparseAttention(nn.Module):
-    """Longformer-style static sparse attention with optional local window.
+    """Block-sparse static attention using FlexAttention.
 
-    The first ``num_cls`` positions are global CLS tokens that attend to all
-    tokens. Patch tokens attend to CLS tokens and, if ``window_size > 0``,
-    also to the ``2 * window_size + 1`` sequence neighbours around them.
-
-    The two attention patterns are combined into a single softmax per patch
-    query over the concatenated key set ``[CLS_1 ... CLS_K | patch_{i-W} ...
-    patch_{i+W}]``.
+    CLS tokens (first ``num_cls`` positions) attend to the full sequence.
+    Patch tokens attend to CLS tokens plus ``window_size`` neighbouring
+    chunks on each side.  Patches should be Hilbert-sorted beforehand so
+    that sequence-local chunks correspond to spatially nearby patches.
 
     Args:
         embed_dim: Total embedding dimension.
         num_heads: Number of attention heads.
-        num_cls: Number of global CLS tokens at the front of the sequence. (num_cls + patch_len >= 8 for MMA)
-        window_size: One-sided local window radius for patch-to-patch attention.
-            Patch i attends to patches [i-W, i+W].
-            Set to 0 to disable local patch attention (CLS-only).
-        dilation: Step size between attended patches inside the local window.
-            ``dilation=1`` gives a standard consecutive window.
-            ``dilation=d`` attends to every d-th patch, covering a span of
-            ``2 * window_size * dilation`` at the same key-count cost.
-        attn_dropout: Dropout probability on attention weights.
-        chunk_size: Number of patch queries to process per SDPA call in the windowed
-            path. Each call uses a block-diagonal mask of shape
-            ``(chunk_size, chunk_size * context_len)``, keeping the query sequence long enough for
-            Flash Attention / MMA (requires chunk_size >= 8).
-        rope_theta: Base frequency for :class:`Rope2D`. Default: 10_000.
+        num_cls: Number of global CLS tokens at the front of the sequence.
+        window_size: Number of neighbouring chunks (on each side) that each
+            patch chunk attends to.  ``0`` = same-chunk only + CLS.
+        chunk_size: Number of Hilbert-sorted patches per logical chunk.
+            Must be a multiple of ``flex_block_size``.
+        flex_block_size: FlexAttention kernel tile size. Hardware-dependent;
+            128 is optimal for H100.
+        rope_theta: Base frequency for :class:`Rope2D`.
         rope_coord_high: Coordinate normalisation divisor for :class:`Rope2D`.
-            Raw pixel coordinates are divided by this value. Default: 100_000.
     """
 
     def __init__(
@@ -111,10 +144,9 @@ class StaticSparseAttention(nn.Module):
         embed_dim: int,
         num_heads: int,
         num_cls: int = 1,
-        window_size: int = 0,
-        dilation: int = 1,
-        attn_dropout: float = 0.0,
-        chunk_size: int = 512,
+        window_size: int = 1,
+        chunk_size: int = 256,
+        flex_block_size: int = 128,
         rope_theta: float = 10_000.0,
         rope_coord_high: float = 100_000.0,
     ) -> None:
@@ -124,191 +156,61 @@ class StaticSparseAttention(nn.Module):
                 f"embed_dim ({embed_dim}) must be divisible by num_heads ({num_heads}) "
                 f"(preferably embed_dim/num_heads = 64)"
             )
+        if chunk_size % flex_block_size != 0:
+            raise ValueError(
+                f"chunk_size ({chunk_size}) must be a multiple of "
+                f"flex_block_size ({flex_block_size})"
+            )
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.num_cls = num_cls
         self.window_size = window_size
-        self.dilation = dilation
-        self.head_dim = embed_dim // num_heads
         self.chunk_size = chunk_size
+        self.flex_block_size = flex_block_size
+        self.head_dim = embed_dim // num_heads
 
         self.rope = Rope2D(self.head_dim, theta=rope_theta, coord_high=rope_coord_high)
         self.qkv = nn.Linear(embed_dim, 3 * embed_dim, bias=True)
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=True)
-        self.attn_dropout = attn_dropout
 
     def forward(self, x: Tensor, coords: Tensor | None = None) -> Tensor:
-        """Static sparse attention.
+        """Block-sparse attention over a CLS-prepended patch sequence.
 
         Args:
-            x: Token sequence ``(batch_size, num_cls + patch_len, embed_dim)``,
-               CLS tokens prepended.
-            coords: Patch pixel coordinates ``(batch_size, patch_len, 2)``.
-               When provided, 2-D RoPE is applied to patch Q and K.
+            x: ``(batch_size, num_cls + patch_len, embed_dim)`` — CLS tokens prepended.
+            coords: ``(batch_size, patch_len, 2)`` — patch pixel coordinates for 2-D RoPE.
 
         Returns:
-            Output of shape ``(batch_size, num_cls + patch_len, embed_dim)``.
+            ``(batch_size, num_cls + patch_len, embed_dim)``
         """
         batch_size, seq_len, embed_dim = x.shape
         num_cls = self.num_cls
-        patch_len = seq_len - num_cls
 
         qkv = self.qkv(x).reshape(batch_size, seq_len, 3, self.num_heads, self.head_dim)
         qkv = qkv.permute(2, 0, 3, 1, 4)  # (3, batch_size, num_heads, seq_len, head_dim)
-        q, k, v = qkv.unbind(0)            # each (batch_size, num_heads, seq_len, head_dim)
+        q, k, v = qkv.unbind(0)
 
-        # Apply 2-D RoPE to patch Q and K — CLS tokens have no spatial position
         if coords is not None:
             q = torch.cat([q[:, :, :num_cls], self.rope(q[:, :, num_cls:], coords)], dim=2)
             k = torch.cat([k[:, :, :num_cls], self.rope(k[:, :, num_cls:], coords)], dim=2)
 
-        dropout_p = self.attn_dropout if self.training else 0.0
 
-        q_cls, k_cls, v_cls = q[:, :, :num_cls], k[:, :, :num_cls], v[:, :, :num_cls]
-        q_patch              = q[:, :, num_cls:]
+        def mask_mod(b, h, q_idx, kv_idx):
+            q_is_cls = q_idx < num_cls
+            kv_is_cls = kv_idx < num_cls
+            q_chunk = (q_idx - num_cls) // self.chunk_size
+            kv_chunk = (kv_idx - num_cls) // self.chunk_size
+            in_window = (q_chunk - kv_chunk).abs() <= self.window_size
+            return q_is_cls | kv_is_cls | in_window
 
-        # CLS tokens: global attention over the full sequence
-        cls_out = F.scaled_dot_product_attention(q_cls, k, v, dropout_p=dropout_p)
-
-        # Patch tokens: CLS only, or CLS + dilated local window
-        if self.window_size == 0:
-            patch_out = F.scaled_dot_product_attention(
-                q_patch, k_cls, v_cls, dropout_p=dropout_p
-            )
-        else:
-            patch_out = self._windowed_patch_attention(
-                q_patch, k_cls, v_cls,
-                k[:, :, num_cls:], v[:, :, num_cls:],
-                patch_len, dropout_p,
-            )
-        out = torch.cat([cls_out, patch_out], dim=2)
+        block_mask = create_block_mask(
+            mask_mod, B=None, H=None, Q_LEN=seq_len, KV_LEN=seq_len,
+            device=x.device, BLOCK_SIZE=self.flex_block_size,
+        )
+        out = flex_attention(q, k, v, block_mask=block_mask)
 
         out = out.transpose(1, 2).reshape(batch_size, seq_len, embed_dim)
         return self.out_proj(out)
-
-    def _windowed_patch_attention(
-        self,
-        q_patch: Tensor,  # (batch_size, num_heads, patch_len, head_dim)
-        k_cls:   Tensor,  # (batch_size, num_heads, num_cls,   head_dim)
-        v_cls:   Tensor,  # (batch_size, num_heads, num_cls,   head_dim)
-        k_patch: Tensor,  # (batch_size, num_heads, patch_len, head_dim)
-        v_patch: Tensor,  # (batch_size, num_heads, patch_len, head_dim)
-        patch_len: int,
-        dropout_p: float,
-    ) -> Tensor:
-        """Each patch attends to its CLS tokens plus a dilated local window.
-
-        The gather and SDPA are fused inside a chunk loop so that at most
-        ``chunk_size`` patches' context keys/values are in memory at once.
-        Peak memory per chunk: O(chunk_size * context_len * head_dim).
-
-        Boundary patches attend to fewer neighbours (masked, not wrapped).
-
-        Returns: (batch_size, num_heads, patch_len, head_dim)
-        """
-        batch_size, num_heads, _, head_dim = q_patch.shape
-        num_cls = self.num_cls
-        window_size = self.window_size
-        dilation = self.dilation
-        chunk_size = self.chunk_size
-        window_len = 2 * window_size + 1
-        context_len = num_cls + window_len
-        pad = window_size * dilation
-
-        # Pad k/v along the sequence axis so boundary patches can use the same
-        # window logic as interior patches (padded positions are masked out below).
-        k_padded = F.pad(k_patch, (0, 0, pad, pad))  # (batch_size, num_heads, patch_len+2*pad, head_dim)
-        v_padded = F.pad(v_patch, (0, 0, pad, pad))
-
-        # Precompute boundary window positions (shared across chunks).
-        window_pos = (torch.arange(window_len, device=q_patch.device) - window_size) * dilation  # (window_len,)
-
-        # For dilation=1, unfold gives a zero-copy strided view of all windows:
-        #   shape (batch_size, num_heads, patch_len, head_dim, window_len) → permute → (... window_len, head_dim)
-        # For dilation>1 we fall back to torch.gather inside the loop.
-        use_unfold = (dilation == 1)
-        if use_unfold:
-            # unfold(dim, size, step=1): returns a non-contiguous strided VIEW — no allocation.
-            # Slicing it per-chunk inside the loop materialises only `chunk` rows at a time
-            # (via the subsequent torch.cat), which is the memory-bounded path we want.
-            k_all_windows = k_padded.unfold(2, window_len, 1).permute(0, 1, 2, 4, 3)
-            v_all_windows = v_padded.unfold(2, window_len, 1).permute(0, 1, 2, 4, 3)
-            # shapes (strided views): (batch_size, num_heads, patch_len, window_len, head_dim)
-        else:
-            offsets = torch.arange(window_len, device=q_patch.device) * dilation  # (window_len,)
-
-        # Pre-expand CLS k/v — shape is small; safe to keep fully expanded.
-        k_cls_exp = k_cls.unsqueeze(2)   # (batch_size, num_heads, 1, num_cls, head_dim)  — broadcast below
-        v_cls_exp = v_cls.unsqueeze(2)
-
-        chunks: list[Tensor] = []
-        for start in range(0, patch_len, chunk_size):
-            end   = min(start + chunk_size, patch_len)
-            chunk = end - start  # number of patches in this chunk
-
-            if use_unfold:
-                # Zero-copy slice from the pre-computed strided view
-                k_windows = k_all_windows[:, :, start:end]  # (batch_size, num_heads, chunk, window_len, head_dim)
-                v_windows = v_all_windows[:, :, start:end]
-            else:
-                chunk_positions = torch.arange(start, end, device=q_patch.device)  # (chunk,)
-                gather_idx = chunk_positions.unsqueeze(1) + offsets.unsqueeze(0)  # (chunk, window_len)
-                gather_idx_exp = (
-                    gather_idx
-                    .unsqueeze(0).unsqueeze(0).unsqueeze(-1)              # (1, 1, chunk, window_len, 1)
-                    .expand(batch_size, num_heads, -1, -1, head_dim)      # (batch_size, num_heads, chunk, window_len, head_dim)
-                )
-                k_windows = torch.gather(
-                    k_padded.unsqueeze(3).expand(-1, -1, -1, window_len, -1),
-                    2, gather_idx_exp,
-                )  # (batch_size, num_heads, chunk, window_len, head_dim)
-                v_windows = torch.gather(
-                    v_padded.unsqueeze(3).expand(-1, -1, -1, window_len, -1),
-                    2, gather_idx_exp,
-                )  # (batch_size, num_heads, chunk, window_len, head_dim)
-
-            # Prepend CLS tokens: (batch_size, num_heads, chunk, context_len, head_dim)
-            k_context = torch.cat(
-                [k_cls_exp.expand(-1, -1, chunk, -1, -1), k_windows], dim=3
-            )
-            v_context = torch.cat(
-                [v_cls_exp.expand(-1, -1, chunk, -1, -1), v_windows], dim=3
-            )
-
-            # Boundary mask for this chunk: (chunk, context_len)
-            chunk_positions_for_mask = torch.arange(start, end, device=q_patch.device)
-            in_bounds   = (chunk_positions_for_mask.unsqueeze(1) + window_pos >= 0) & \
-                          (chunk_positions_for_mask.unsqueeze(1) + window_pos < patch_len)
-            window_mask = q_patch.new_zeros(chunk, window_len)
-            window_mask[~in_bounds] = float("-inf")
-            attn_mask   = torch.cat(
-                [q_patch.new_zeros(chunk, num_cls), window_mask], dim=1
-            )  # (chunk, context_len)
-
-            # Flatten for SDPA: (batch_size*num_heads*chunk, 1, head_dim) queries
-            num_queries_flat = batch_size * num_heads * chunk
-            q_flat = q_patch[:, :, start:end].reshape(num_queries_flat, 1, head_dim)
-            k_flat = k_context.reshape(num_queries_flat, context_len, head_dim)
-            v_flat = v_context.reshape(num_queries_flat, context_len, head_dim)
-
-            # Mask: (chunk, context_len) → (batch_size*num_heads*chunk, 1, context_len)
-            mask_flat = (
-                attn_mask
-                .unsqueeze(1)                                  # (chunk, 1, context_len)
-                .unsqueeze(0)                                  # (1, chunk, 1, context_len)
-                .expand(batch_size * num_heads, -1, -1, -1)   # (batch_size*num_heads, chunk, 1, context_len)
-                .reshape(num_queries_flat, 1, context_len)
-            )
-
-            out_chunk = F.scaled_dot_product_attention(
-                q_flat, k_flat, v_flat,
-                attn_mask=mask_flat,
-                dropout_p=dropout_p,
-            )  # (batch_size*num_heads*chunk, 1, head_dim)
-
-            chunks.append(out_chunk.reshape(batch_size, num_heads, chunk, head_dim))
-
-        return torch.cat(chunks, dim=2)  # (batch_size, num_heads, patch_len, head_dim)
 
 
 class StaticSparseViTBlock(nn.Module):
@@ -318,12 +220,11 @@ class StaticSparseViTBlock(nn.Module):
         embed_dim: Embedding dimension.
         num_heads: Number of attention heads.
         num_cls: Number of global CLS tokens.
-        window_size: Local window radius for patch-to-patch attention (0 = disabled).
-        dilation: Step size between attended window patches (1 = consecutive).
+        window_size: Neighbouring chunks on each side for patch attention.
+        chunk_size: Patches per logical chunk.
+        flex_block_size: FlexAttention kernel tile size.
         expansion_factor: Hidden-dim expansion factor in the MLP.
-        attn_dropout: Dropout in attention weights.
         proj_dropout: Dropout after attention and MLP projections.
-        chunk_size: Patch chunk size forwarded to :class:`StaticSparseAttention`.
         rope_theta: RoPE base frequency forwarded to :class:`StaticSparseAttention`.
         rope_coord_high: RoPE coordinate normalisation forwarded to
             :class:`StaticSparseAttention`.
@@ -334,20 +235,19 @@ class StaticSparseViTBlock(nn.Module):
         embed_dim: int,
         num_heads: int,
         num_cls: int = 1,
-        window_size: int = 0,
-        dilation: int = 1,
+        window_size: int = 1,
+        chunk_size: int = 256,
+        flex_block_size: int = 128,
         expansion_factor: float = 4.0,
-        attn_dropout: float = 0.0,
         proj_dropout: float = 0.0,
-        chunk_size: int = 512,
         rope_theta: float = 10_000.0,
         rope_coord_high: float = 100_000.0,
     ) -> None:
         super().__init__()
         self.norm1 = nn.LayerNorm(embed_dim)
         self.attn = StaticSparseAttention(
-            embed_dim, num_heads, num_cls, window_size, dilation,
-            attn_dropout, chunk_size, rope_theta, rope_coord_high,
+            embed_dim, num_heads, num_cls, window_size, chunk_size,
+            flex_block_size, rope_theta, rope_coord_high,
         )
         self.drop1 = nn.Dropout(proj_dropout)
 
@@ -368,10 +268,10 @@ class StaticSparseViTBlock(nn.Module):
 
 
 class StaticSparseViTSlideEncoder(nn.Module):
-    """Slide-level ViT encoder using Longformer-style static sparse attention.
+    """Slide-level ViT encoder using block-sparse static attention.
 
-    Takes a bag of pre-extracted patch embeddings and produces a slide-level
-    classification.
+    Takes a bag of pre-extracted patch embeddings, Hilbert-sorts them for
+    spatial locality, and produces a slide-level classification.
 
     Args:
         in_features: Patch embedding dimension (1280 for Virchow2 CLS token).
@@ -380,16 +280,13 @@ class StaticSparseViTSlideEncoder(nn.Module):
         num_heads: Number of attention heads (must divide ``embed_dim``).
         num_layers: Number of transformer blocks.
         num_cls: Number of global CLS tokens.
-        window_size: One-sided local window radius for patch attention (0 = disabled).
-        dilation: Step size between attended window patches (1 = consecutive).
+        window_size: Neighbouring chunks on each side for patch attention.
+        chunk_size: Patches per logical chunk.
+        flex_block_size: FlexAttention kernel tile size.
         expansion_factor: MLP hidden-dim expansion factor.
-        attn_dropout: Dropout on attention weights.
         proj_dropout: Dropout after projections.
-        chunk_size: Number of patch queries processed per SDPA call in the windowed
-            attention path. Must be >= 8 for Flash Attention / MMA.
         rope_theta: Base frequency for 2-D RoPE. Default: 10_000.
-        rope_coord_high: Coordinate normalisation divisor for RoPE. Raw pixel
-            coordinates are divided by this value. Default: 100_000.
+        rope_coord_high: Coordinate normalisation divisor for RoPE. Default: 100_000.
     """
 
     def __init__(
@@ -400,12 +297,11 @@ class StaticSparseViTSlideEncoder(nn.Module):
         num_heads: int = 6,
         num_layers: int = 6,
         num_cls: int = 2,
-        window_size: int = 0,
-        dilation: int = 1,
+        window_size: int = 1,
+        chunk_size: int = 256,
+        flex_block_size: int = 128,
         expansion_factor: float = 4.0,
-        attn_dropout: float = 0.0,
         proj_dropout: float = 0.0,
-        chunk_size: int = 512,
         rope_theta: float = 10_000.0,
         rope_coord_high: float = 100_000.0,
     ) -> None:
@@ -416,22 +312,19 @@ class StaticSparseViTSlideEncoder(nn.Module):
 
         self.input_proj = nn.Linear(in_features, embed_dim)
 
-        # Learned global CLS tokens
         self.cls_tokens = nn.Parameter(torch.zeros(1, num_cls, embed_dim))
         nn.init.trunc_normal_(self.cls_tokens, std=0.02)
 
-        # Transformer blocks
         self.blocks = nn.ModuleList([
             StaticSparseViTBlock(
                 embed_dim=embed_dim,
                 num_heads=num_heads,
                 num_cls=num_cls,
                 window_size=window_size,
-                dilation=dilation,
-                expansion_factor=expansion_factor,
-                attn_dropout=attn_dropout,
-                proj_dropout=proj_dropout,
                 chunk_size=chunk_size,
+                flex_block_size=flex_block_size,
+                expansion_factor=expansion_factor,
+                proj_dropout=proj_dropout,
                 rope_theta=rope_theta,
                 rope_coord_high=rope_coord_high,
             )
@@ -439,12 +332,8 @@ class StaticSparseViTSlideEncoder(nn.Module):
         ])
 
         self.norm = nn.LayerNorm(embed_dim)
-
         self.cls_pool = nn.Linear(embed_dim, 1, bias=False)
-
-        # Classification head
         self.head = nn.Linear(embed_dim, out_features)
-
         self._init_weights()
 
     def _init_weights(self) -> None:
@@ -456,44 +345,42 @@ class StaticSparseViTSlideEncoder(nn.Module):
         """Encode a bag of patch embeddings and return slide-level logits.
 
         Args:
-            x: Patch embeddings ``(B, patch_len, in_features)``.
-            coords: Patch pixel coordinates ``(B, patch_len, 2)``.
-                When provided, 2-D RoPE is applied to patch Q and K inside
-                every attention layer. CLS tokens are never rotated.
+            x: Patch embeddings ``(batch_size, patch_len, in_features)``.
+            coords: Patch pixel coordinates ``(batch_size, patch_len, 2)``.
 
         Returns:
-            Dict with ``"logits"`` of shape ``(B, out_features)``.
+            Dict with ``"logits"`` of shape ``(batch_size, out_features)``.
         """
         if x.dim() == 2:
             x = x.unsqueeze(0)
 
         batch_size = x.shape[0]
+        x = self.input_proj(x)
 
-        # Project patch embeddings into the transformer's working dimension
-        x = self.input_proj(x)  # (batch_size, patch_len, embed_dim)
+        if coords is not None:
+            sort_idx = hilbert_sort(coords)
+            x = x.gather(1, sort_idx.unsqueeze(-1).expand_as(x))
+            coords = coords.gather(1, sort_idx.unsqueeze(-1).expand(-1, -1, 2))
 
-        # Prepend CLS tokens
-        cls = self.cls_tokens.expand(batch_size, -1, -1)  # (batch_size, num_cls, embed_dim)
-        x = torch.cat([cls, x], dim=1)                    # (batch_size, num_cls + patch_len, embed_dim)
+        cls = self.cls_tokens.expand(batch_size, -1, -1)
+        x = torch.cat([cls, x], dim=1)
 
         for block in self.blocks:
             x = block(x, coords)
 
         x = self.norm(x)
 
-        cls_tokens = x[:, :self.num_cls]                            # (batch_size, num_cls, embed_dim)
-        weights = torch.softmax(self.cls_pool(cls_tokens), dim=1)   # (batch_size, num_cls, 1)
-        cls_out = (weights * cls_tokens).sum(dim=1)                 # (batch_size, embed_dim)
+        cls_tokens = x[:, :self.num_cls]
+        weights = torch.softmax(self.cls_pool(cls_tokens), dim=1)
+        cls_out = (weights * cls_tokens).sum(dim=1)
 
-        logits = self.head(cls_out)  # (batch_size, out_features)
-
-        return {"logits": logits}
+        return {"logits": self.head(cls_out)}
 
 class StaticSparseAttentionAdapter(nn.Module):
     """Adapts StaticSparseAttention to the ViT-5 Block ``Attention_block`` API.
 
     ``Block.__init__`` calls ``Attention_block(dim, num_heads=..., attn_drop=...,
-    flash=..., rope_size=..., ...)`` with ViT-5-specific kwargs. This adapter
+    flash=..., rope_size=..., ...)`` with ViT-5-specific kwargs.  This adapter
     accepts the relevant subset and silently absorbs the rest via ``**_``.
     """
 
@@ -503,12 +390,11 @@ class StaticSparseAttentionAdapter(nn.Module):
         num_heads: int = 8,
         *,
         num_cls: int = 1,
-        window_size: int = 0,
-        dilation: int = 1,
-        chunk_size: int = 512,
+        window_size: int = 1,
+        chunk_size: int = 256,
+        flex_block_size: int = 128,
         rope_theta: float = 10_000.0,
         rope_coord_high: float = 100_000.0,
-        attn_drop: float = 0.0,
         **_,
     ) -> None:
         super().__init__()
@@ -517,16 +403,11 @@ class StaticSparseAttentionAdapter(nn.Module):
             num_heads=num_heads,
             num_cls=num_cls,
             window_size=window_size,
-            dilation=dilation,
-            attn_dropout=attn_drop,
             chunk_size=chunk_size,
+            flex_block_size=flex_block_size,
             rope_theta=rope_theta,
             rope_coord_high=rope_coord_high,
         )
 
     def forward(self, x: Tensor, coords: Tensor | None = None) -> Tensor:
         return self.attn(x, coords)
-
-
-# Notes:
-# embed_dim / num_heads should equal 64

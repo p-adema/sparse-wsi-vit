@@ -52,17 +52,18 @@ PRECISION="bf16-mixed"
 # PRECISION="32-true"
 EMBED_DIM=384
 NUM_HEADS=6            # embed_dim // num_heads=64
-DEPTH=12
-NUM_CLS=4
+DEPTH=6
+NUM_CLS=8
 
 MLP_RATIO=4.0
-ATTN_DROPOUT=0.0
 PROJ_DROPOUT=0.0
 DROP_PATH_RATE=0.1
 LAYER_SCALE=True
 INIT_SCALE=1e-4
 
 GRADIENT_CHECKPOINTING=True
+
+USE_HILBERT_SORT = True
 
 WARMUP_ITERATIONS_PERCENTAGE=0.05
 LEARNING_RATE=2e-4
@@ -74,10 +75,9 @@ CLASS_WEIGHTS=True
 WORKER_PREFETCH=2
 
 # ─── StaticSparseAttention-specific ──────────────────────────────────────────
-WINDOW_SIZE=5
-DILATION=1
-CHUNK_SIZE=512
-# CHUNK_SIZE=4096
+WINDOW_SIZE=1            # neighbouring chunks on each side
+CHUNK_SIZE=256           # patches per logical chunk (must be multiple of FLEX_BLOCK_SIZE)
+FLEX_BLOCK_SIZE=128      # FlexAttention kernel tile size
 ROPE_THETA=10_000.0
 ROPE_COORD_HIGH=100_000.0
 
@@ -113,18 +113,18 @@ def get_config() -> ExperimentConfig:
         sparse_attn=SPARSE_ATTN,
         # StaticSparseAttention kwargs
         window_size=WINDOW_SIZE,
-        dilation=DILATION,
         chunk_size=CHUNK_SIZE,
+        flex_block_size=FLEX_BLOCK_SIZE,
         rope_theta=ROPE_THETA,
         rope_coord_high=ROPE_COORD_HIGH,
         # Shared kwargs
         mlp_ratio=MLP_RATIO,
-        attn_dropout=ATTN_DROPOUT,
         proj_dropout=PROJ_DROPOUT,
         drop_path_rate=DROP_PATH_RATE,
         layer_scale=LAYER_SCALE,
         init_scale=INIT_SCALE,
         gradient_checkpointing=GRADIENT_CHECKPOINTING,
+        use_hilbert_sort=USE_HILBERT_SORT
     )
 
     # Lightning wrapper mappings
