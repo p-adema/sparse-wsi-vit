@@ -19,32 +19,37 @@ from sparse_wsi_vit.experiments.default_cfg import (
 )
 from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
 from sparse_wsi_vit.models.vit5_dense import VitDensePreEmbedded
-from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import WSIAttnWrapper
-from sparse_wsi_vit.experiments.datamodules.halligalli_h5_datamodule import HalliGalliH5DataModule
+from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import (
+    WSIAttnWrapper,
+)
+from sparse_wsi_vit.experiments.datamodules.halligalli_h5_datamodule import (
+    HalliGalliH5DataModule,
+)
 
 # ─── Data ────────────────────────────────────────────────────────────────────
-DATA_DIR     = os.environ["HALLIGALLI_DATA_DIR"]
-IN_FEATURES  = 256    # ShapePatchCNN embed_dim
-OUT_FEATURES = 2      # binary, CrossEntropy
+DATA_DIR = os.environ["HALLIGALLI_DATA_DIR"]
+IN_FEATURES = 256  # ShapePatchCNN embed_dim
+OUT_FEATURES = 2  # binary, CrossEntropy
 
 # ─── Optimisation ────────────────────────────────────────────────────────────
-BATCH_SIZE    = 1     # standard for MIL bags
-NUM_WORKERS   = 16
-PRECISION     = "bf16-mixed"
+BATCH_SIZE = 1  # standard for MIL bags
+NUM_WORKERS = 16
+PRECISION = "bf16-mixed"
 
-DOWNPROJ                     = None  # 256-d input is already small; no projection needed
-TRAINING_ITERATIONS          = 10_000
+DOWNPROJ = None  # 256-d input is already small; no projection needed
+TRAINING_ITERATIONS = 10_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
-LEARNING_RATE                = 5e-5
-WEIGHT_DECAY                 = 1e-4
-GRAD_CLIP                    = 1.0
-ACCUMULATE_GRAD_STEPS        = 8
+LEARNING_RATE = 5e-5
+WEIGHT_DECAY = 1e-4
+GRAD_CLIP = 1.0
+ACCUMULATE_GRAD_STEPS = 8
+ROPE_DYNAMIC_HIGH = 224  # todo lucius, dit moet de groote van de patch size zijn
 
 
 def get_config() -> ExperimentConfig:
     config = ExperimentConfig()
     config.debug = False
-    config.seed  = 42
+    config.seed = 42
 
     config.dataset = LazyConfig(HalliGalliH5DataModule)(
         data_dir=DATA_DIR,
@@ -57,6 +62,7 @@ def get_config() -> ExperimentConfig:
         in_features=IN_FEATURES,
         out_features=OUT_FEATURES,
         downproj=DOWNPROJ,
+        rope_dynamic_high=ROPE_DYNAMIC_HIGH,
     )
 
     config.lightning_wrapper_class = LazyConfig(WSIAttnWrapper)(
