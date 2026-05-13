@@ -13,15 +13,15 @@ class H5FeatureBagDataset(Dataset):
     """
 
     def __init__(
-            self,
-            csv_path,
-            features_dir,
-            label_col_name="label",
-            transform=None,
-            class_weights=False,
-            features_name: str = "features",
-            coords_name: str = "coords",
-            flatten_block: bool = True
+        self,
+        csv_path,
+        features_dir,
+        label_col_name="label",
+        transform=None,
+        class_weights=False,
+        features_name: str = "features",
+        coords_name: str = "coords",
+        flatten_block: bool = True,
     ):
         """
         Args:
@@ -105,8 +105,10 @@ class H5FeatureBagDataset(Dataset):
         h5_path = item["h5_path"]
 
         with h5py.File(h5_path, "r") as f:
-            features = f[self.features_name][:]  # shape: (N_patches, 1280) or (N_blocks, 64, 1280)
-            coords = f[self.coords_name][:]  # shape: (N_patches, 2) or (N_blocks, 64, 2)
+            # shape: (N_patches, 1280) or (N_blocks, 64, 1280)
+            features = f[self.features_name][:]
+            # shape: (N_patches, 2) or (N_blocks, 64, 2)
+            coords = f[self.coords_name][:]
 
         if self.flatten_block and len(features.shape) == 3:
             features = features.reshape(-1, 1280)

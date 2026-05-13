@@ -35,18 +35,18 @@ OUT_FEATURES = 1  # Binary tasks
 PRECISION = "bf16-mixed"
 CHECKPOINT_ACTIVATIONS = True  # instead of cropping
 
-TRAINING_ITERATIONS = 5_000
+TRAINING_ITERATIONS = 1_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
 LEARNING_RATE = 2e-4
 WEIGHT_DECAY = 1e-4
 GRAD_CLIP = 1.0
-ACCUMULATE_GRAD_STEPS = 1
+ACCUMULATE_GRAD_STEPS = 5
 
 
 def get_config() -> ExperimentConfig:
     config = ExperimentConfig()
     config.debug = False  # set to False to actually train
-    config.seed = 0
+    config.seed = 42
 
     # Dataset: Connects to your H5 extraction
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
@@ -58,7 +58,7 @@ def get_config() -> ExperimentConfig:
         num_workers=NUM_WORKERS,
         class_weights=CLASS_WEIGHTS,
         worker_prefetch=WORKER_PREFETCH,
-        features_name="cls_224x224",  # low resolution!
+        features_name="patches_224x224",  # low resolution!
         coords_name="coords_224x224",
     )
 
