@@ -14,13 +14,13 @@ class WSIAttnWrapper(LightningWrapperBase):
     """Lightning wrapper for global attention on WSIs, cropping into training images."""
 
     def __init__(
-            self,
-            network: torch.nn.Module,
-            cfg: ExperimentConfig,
-            use_bce_loss: bool = True,
-            training_crop_tokens: int | None = None,
-            eval_crop_tokens: int | None = None,
-            compile_mode: str | None = None,
+        self,
+        network: torch.nn.Module,
+        cfg: ExperimentConfig,
+        use_bce_loss: bool = True,
+        training_crop_tokens: int | None = None,
+        eval_crop_tokens: int | None = None,
+        compile_mode: str | None = None,
     ):
         """Initialize the WSIAttnWrapper.
 
@@ -56,9 +56,9 @@ class WSIAttnWrapper(LightningWrapperBase):
             self.compile(mode=compile_mode)
 
     def _step(
-            self,
-            batch: dict[str, torch.Tensor],
-            accuracy_calculator: torchmetrics.Metric,
+        self,
+        batch: dict[str, torch.Tensor],
+        accuracy_calculator: torchmetrics.Metric,
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
         """Shared forward + loss computation for train and validation.
 
@@ -93,7 +93,7 @@ class WSIAttnWrapper(LightningWrapperBase):
         return loss, preds, {"logits": logits}
 
     def training_step(
-            self, batch: dict[str, torch.Tensor], batch_idx: int
+        self, batch: dict[str, torch.Tensor], batch_idx: int
     ) -> torch.Tensor:
         """Perform one training step and log loss.
 
@@ -107,7 +107,7 @@ class WSIAttnWrapper(LightningWrapperBase):
         gc.collect()
         torch.cuda.empty_cache()
         self._maybe_crop_batch(batch, self.training_crop_tokens)
-        loss, _, _ = self._step(batch, self.train_acc)
+        loss, _, info = self._step(batch, self.train_acc)
         self.log(
             "train/loss",
             loss,
@@ -115,6 +115,12 @@ class WSIAttnWrapper(LightningWrapperBase):
             on_epoch=True,
             sync_dist=True,
             batch_size=batch["input"].size(0),
+        )
+        self.log(
+            "train/logit",
+            info["logits"],
+            on_step=True,
+            on_epoch=False,
         )
         return loss
 
@@ -144,7 +150,7 @@ class WSIAttnWrapper(LightningWrapperBase):
         self.train_acc.reset()
 
     def validation_step(
-            self, batch: dict[str, torch.Tensor], batch_idx: int
+        self, batch: dict[str, torch.Tensor], batch_idx: int
     ) -> torch.Tensor:
         """Perform one validation step and log loss.
 
@@ -159,7 +165,7 @@ class WSIAttnWrapper(LightningWrapperBase):
         torch.cuda.empty_cache()
         self._maybe_crop_batch(batch, self.eval_crop_tokens)
         with torch.inference_mode():
-            loss, _, _ = self._step(batch, self.val_acc)
+            loss, _, info = self._step(batch, self.val_acc)
         self.log(
             "val/loss",
             loss,
@@ -167,6 +173,12 @@ class WSIAttnWrapper(LightningWrapperBase):
             on_epoch=True,
             sync_dist=True,
             batch_size=batch["input"].size(0),
+        )
+        self.log(
+            "val/logit",
+            info["logits"],
+            on_step=True,
+            on_epoch=False,
         )
         return loss
 

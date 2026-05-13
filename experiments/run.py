@@ -16,6 +16,7 @@ import torch
 from pytorch_lightning.loggers import WandbLogger
 from rich import print as rprint
 from rich.tree import Tree
+import lightning_fabric
 
 import wandb
 from sparse_wsi_vit.experiments.trainer import construct_trainer
@@ -243,10 +244,13 @@ def main() -> None:
         model,
         datamodule=datamodule,
     )
-    trainer.test(
-        model,
-        datamodule=datamodule,
-    )
+    try:
+        trainer.test(
+            model,
+            datamodule=datamodule,
+        )
+    except lightning_fabric.utilities.exceptions.MisconfigurationException:
+        print("No valid test configuration, skipping")
 
 
 if __name__ == "__main__":

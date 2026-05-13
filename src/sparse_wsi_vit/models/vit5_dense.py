@@ -44,7 +44,7 @@ class VitDensePreEmbedded(nn.Module):
             rope=True,
             rope_dynamic=True,
             embed_dim=in_features if downproj is None else downproj,
-            num_heads=8,
+            # num_heads=8,
             depth=6,
             checkpoint_activations=checkpoint_activations,
         )

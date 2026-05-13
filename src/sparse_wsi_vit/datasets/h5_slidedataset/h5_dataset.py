@@ -1,8 +1,9 @@
+from pathlib import Path
+
+import h5py
+import pandas as pd
 import torch
 from torch.utils.data import Dataset
-import pandas as pd
-from pathlib import Path
-import h5py
 
 
 class H5FeatureBagDataset(Dataset):
@@ -13,15 +14,16 @@ class H5FeatureBagDataset(Dataset):
     """
 
     def __init__(
-            self,
-            csv_path,
-            features_dir,
-            label_col_name="label",
-            transform=None,
-            class_weights=False,
-            features_name: str = "features",
-            coords_name: str = "coords",
-            flatten_block: bool = True
+        self,
+        csv_path,
+        features_dir,
+        label_col_name="label",
+        transform=None,
+        class_weights=False,
+        features_name: str = "features",
+        coords_name: str = "coords",
+        flatten_block: bool = True,
+        downscale_block: int = 1,
     ):
         """
         Args:
@@ -41,6 +43,7 @@ class H5FeatureBagDataset(Dataset):
         self.features_name = features_name
         self.coords_name = coords_name
         self.flatten_block = flatten_block
+        self.downscale_block = downscale_block
 
         # Load slide-level metadata
         df = pd.read_csv(csv_path)
@@ -88,11 +91,11 @@ class H5FeatureBagDataset(Dataset):
         """Return the number of valid slides in the dataset."""
         return len(self.slides)
 
-    def __getitem__(self, idx: int) -> dict:
+    def __getitem__(self, index: int) -> dict:
         """Load a single slide's feature bag from disk.
 
         Args:
-            idx: Index into the dataset.
+            index: Index into the dataset.
 
         Returns:
             Dict with keys:
@@ -101,12 +104,24 @@ class H5FeatureBagDataset(Dataset):
                 - ``"slide_name"`` (str): Slide identifier.
                 - ``"coords"`` (torch.Tensor): Patch coordinates, shape (N, 2), float32.
         """
-        item = self.slides[idx]
+        item = self.slides[index]
         h5_path = item["h5_path"]
 
         with h5py.File(h5_path, "r") as f:
-            features = f[self.features_name][:]  # shape: (N_patches, 1280) or (N_blocks, 64, 1280)
-            coords = f[self.coords_name][:]  # shape: (N_patches, 2) or (N_blocks, 64, 2)
+            # shape: (N_patches, 1280) or (N_blocks, 64, 1280)
+            features = f[self.features_name][:]
+            # shape: (N_patches, 2) or (N_blocks, 64, 2)
+            coords = f[self.coords_name][:]
+
+        if self.downscale_block > 1:
+            assert self.downscale_block in (2, 4, 8), "Can only downscale by power of 2"
+            assert len(features.shape) == 3, "Can only downscale when given block info"
+            n_blocks = features.shape[0]
+            bcount, bsize = 8 // self.downscale_block, self.downscale_block
+            features = features.reshape(n_blocks, bcount, bsize, bcount, bsize, 1280)
+            features = features.mean((2, 4)).reshape(n_blocks, bcount * bcount, 1280)
+            coords = coords.reshape(n_blocks, bcount, bsize, bcount, bsize, 2)
+            coords = coords[:, :, 0, :, 0, :]
 
         if self.flatten_block and len(features.shape) == 3:
             features = features.reshape(-1, 1280)

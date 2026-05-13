@@ -5,42 +5,41 @@ Usage:
 """
 
 import torch
-from pathlib import Path
 
+from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 from sparse_wsi_vit.experiments.default_cfg import (
     ExperimentConfig,
     SchedulerConfig,
     TrainConfig,
     WandbConfig,
 )
-from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
-
-from sparse_wsi_vit.models.vit5_dense import VitDensePreEmbedded
 from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import (
     WSIAttnWrapper,
 )
-from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
+from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
+from sparse_wsi_vit.models.vit5_dense import VitDensePreEmbedded
 
 # ─── Data Details ──────────────────────────────────────────────
-CSV_BASE = "../splits/camelyon/0"
+CSV_BASE = "../splits/camelyon/full"
 FEATURES_DIR = "../camelyon-emb"
+DOWNSCALE_BLOCK = 1
 
 # ─── Hyperparameters ─────────────────────────────────────────────
-BATCH_SIZE = 1  # Standard for MIL bags
-NUM_WORKERS = 1  # Better for HDD or other slow disk
+BATCH_SIZE = 1
+NUM_WORKERS = 4
 WORKER_PREFETCH = 10
-CLASS_WEIGHTS = True  # this TCGA dataset has more cancer than healthy
+CLASS_WEIGHTS = True
 IN_FEATURES = 1280
 OUT_FEATURES = 1  # Binary tasks
 PRECISION = "bf16-mixed"
-CHECKPOINT_ACTIVATIONS = True  # instead of cropping
+CHECKPOINT_ACTIVATIONS = True
 
-TRAINING_ITERATIONS = 10_000
+TRAINING_ITERATIONS = 1_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
 LEARNING_RATE = 2e-4
 WEIGHT_DECAY = 1e-4
 GRAD_CLIP = 1.0
-ACCUMULATE_GRAD_STEPS = 10
+ACCUMULATE_GRAD_STEPS = 5
 
 
 def get_config() -> ExperimentConfig:
@@ -51,15 +50,16 @@ def get_config() -> ExperimentConfig:
     # Dataset: Connects to your H5 extraction
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
         train_csv=f"{CSV_BASE}/train.csv",
-        val_csv=f"{CSV_BASE}/val.csv",
+        val_csv=f"{CSV_BASE}/test.csv",
         features_dir=FEATURES_DIR,
-        label_col_name="label",
+        label_col_name="is_tumor",
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
         class_weights=CLASS_WEIGHTS,
         worker_prefetch=WORKER_PREFETCH,
-        features_name="cls_224x224",  # low resolution!
+        features_name="patches_224x224",  # low resolution!
         coords_name="coords_224x224",
+        downscale_block=DOWNSCALE_BLOCK,
     )
 
     # Network: The very sketchy ViT-5/Small network
@@ -67,7 +67,7 @@ def get_config() -> ExperimentConfig:
         in_features=IN_FEATURES,
         out_features=OUT_FEATURES,
         checkpoint_activations=CHECKPOINT_ACTIVATIONS,
-        downproj=768,  # this is bad! but I need it for now to keep VRAM low because I have other processes running too.
+        downproj=384,
     )
 
     # Lightning wrapper mappings
@@ -103,9 +103,7 @@ def get_config() -> ExperimentConfig:
 
     # W&B Logging
     config.wandb = WandbConfig(
-        project="wsi-classification",
-        job_group="baseline_vit5",
-        entity="dl2-2026"
+        project="wsi-classification", job_group="baseline_vit5", entity="dl2-2026"
     )
 
     return config
