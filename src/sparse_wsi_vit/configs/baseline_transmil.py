@@ -60,6 +60,7 @@ def get_config() -> ExperimentConfig:
     config.net = LazyConfig(TransMIL)(
         in_features=IN_FEATURES,
         out_features=OUT_FEATURES,
+        # Default ~2.5M parameters, we cannot change this
     )
 
     # Lightning wrapper mappings
