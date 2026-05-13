@@ -1,11 +1,11 @@
-"""ABMIL on pre-extracted ShapePatchCNN features from HalliGalli synthetic images.
+"""TransMIL on pre-extracted ShapePatchCNN features from HalliGalli synthetic images.
 
 ShapePatchCNN (256-dim embedding) is trained from scratch on the HalliGalli
 shape vocabulary and used as a frozen patch encoder.
 Features are pre-extracted by extract_halligalli.py.
 
 Usage:
-    uv run experiments/run.py --config src/sparse_wsi_vit/configs/halligalli_abmil.py
+    uv run experiments/run.py --config src/sparse_wsi_vit/configs/halligalli_transmil.py
 """
 
 import os
@@ -18,7 +18,7 @@ from sparse_wsi_vit.experiments.default_cfg import (
     WandbConfig,
 )
 from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
-from sparse_wsi_vit.models.abmil import ABMIL
+from sparse_wsi_vit.models.transmil import TransMIL
 from sparse_wsi_vit.experiments.lightning_wrappers.mil_wrapper import MILWrapper
 from sparse_wsi_vit.experiments.datamodules.halligalli_h5_datamodule import HalliGalliH5DataModule
 
@@ -52,12 +52,10 @@ def get_config() -> ExperimentConfig:
         num_workers=NUM_WORKERS,
     )
 
-    config.net = LazyConfig(ABMIL)(
+    config.net = LazyConfig(TransMIL)(
         in_features=IN_FEATURES,
-        hidden_dim=2048,
         out_features=OUT_FEATURES,
-        num_branches=44,
-        #2.6M parameters
+        #2M parameters
     )
 
     config.lightning_wrapper_class = LazyConfig(MILWrapper)(
@@ -86,7 +84,7 @@ def get_config() -> ExperimentConfig:
 
     config.wandb = WandbConfig(
         project="wsi-classification",
-        job_group="halligalli_abmil_cnn",
+        job_group="halligalli_transmil_cnn",
     )
 
     return config

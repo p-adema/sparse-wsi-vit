@@ -69,6 +69,7 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         features_name: str = "features",
         coords_name: str = "coords",
         flatten_block: bool = True,
+        output_channels: int = 1,
     ):
         super().__init__()
         self.train_csv = train_csv
@@ -78,12 +79,12 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.input_channels = 1280
-        self.output_channels = 1
         self.class_weights = class_weights
         self.worker_prefetch = worker_prefetch
         self.features_name = features_name
         self.coords_name = coords_name
         self.flatten_block = flatten_block
+        self.output_channels = output_channels
 
     def setup(self, stage: str | None = None) -> None:
         """Instantiate train and validation datasets.
