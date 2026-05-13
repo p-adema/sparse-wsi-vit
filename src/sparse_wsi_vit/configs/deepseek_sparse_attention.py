@@ -21,7 +21,7 @@ from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import WSIAt
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 
 # ─── Data Details ──────────────────────────────────────────────
-CSV_BASE   = Path.home() / "splits/camelyon/0"
+CSV_BASE   = Path.home() / "splits/camelyon/full"
 FEATURES_DIR = Path.home() / "camelyon-emb/"
 
 SPARSE_ATTN = "dsa"
@@ -74,9 +74,9 @@ def get_config() -> ExperimentConfig:
     # Dataset: Connects to your H5 extraction
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
         train_csv    = str(CSV_BASE / "train.csv"),
-        val_csv      = str(CSV_BASE / "val.csv"),
+        val_csv      = str(CSV_BASE / "test.csv"),
         features_dir = str(FEATURES_DIR),
-        label_col_name = "label",
+        label_col_name = "is_tumor",
         batch_size   = BATCH_SIZE,
         num_workers  = NUM_WORKERS,
         class_weights=CLASS_WEIGHTS,
