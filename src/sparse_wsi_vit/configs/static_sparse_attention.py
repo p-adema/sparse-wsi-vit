@@ -76,7 +76,7 @@ CLASS_WEIGHTS=True
 WORKER_PREFETCH=2
 
 # ─── StaticSparseAttention-specific ──────────────────────────────────────────
-WINDOW_SIZE=2            # neighbouring chunks on each side
+WINDOW_SIZE=128            # neighbouring chunks on each side
 CHUNK_SIZE=256           # patches per logical chunk (must be multiple of FLEX_BLOCK_SIZE)
 FLEX_BLOCK_SIZE=128      # FlexAttention kernel tile size
 ROPE_THETA=10_000.0
