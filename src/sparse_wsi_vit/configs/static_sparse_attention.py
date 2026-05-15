@@ -22,14 +22,14 @@ from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDat
 from sparse_wsi_vit.experiments.callbacks import AttentionMapCallback
 
 # ─── Data Details ──────────────────────────────────────────────
-CSV_BASE=Path("../splits/camelyon/full")
+CSV_BASE=Path("../splits/camelyon/0")
 # CSV_BASE=Path("../splits/camelyon/full")
 FEATURES_DIR="../camelyon-emb/"
 
 
 train_csv = str(CSV_BASE / "train.csv")
 print(f"{train_csv=}")
-val_csv = str(CSV_BASE / "test.csv")
+val_csv = str(CSV_BASE / "val.csv")
 print(f"{val_csv=}")
 
 train_slides = set(pd.read_csv(train_csv)["slidename"])
@@ -51,13 +51,13 @@ IN_FEATURES=1280
 OUT_FEATURES=1
 PRECISION="bf16-mixed"
 # PRECISION="32-true"
-EMBED_DIM=384
-NUM_HEADS=6            # embed_dim // num_heads=64
+EMBED_DIM=256
+NUM_HEADS=4            # embed_dim // num_heads=64
 DEPTH=6
-NUM_CLS=8
+NUM_CLS=2
 
 MLP_RATIO=4.0
-PROJ_DROPOUT=0.0
+PROJ_DROPOUT=0.2
 DROP_PATH_RATE=0.1
 LAYER_SCALE=True
 INIT_SCALE=1e-4
@@ -68,7 +68,7 @@ USE_HILBERT_SORT = True
 
 WARMUP_ITERATIONS_PERCENTAGE=0.05
 LEARNING_RATE=2e-4
-WEIGHT_DECAY=1e-4
+WEIGHT_DECAY=1e-2
 TRAINING_ITERATIONS=2000
 GRAD_CLIP=1.0
 ACCUMULATE_GRAD_STEPS=8
@@ -76,7 +76,7 @@ CLASS_WEIGHTS=True
 WORKER_PREFETCH=2
 
 # ─── StaticSparseAttention-specific ──────────────────────────────────────────
-WINDOW_SIZE=8            # neighbouring chunks on each side
+WINDOW_SIZE=4            # neighbouring chunks on each side
 CHUNK_SIZE=256           # patches per logical chunk (must be multiple of FLEX_BLOCK_SIZE)
 FLEX_BLOCK_SIZE=128      # FlexAttention kernel tile size
 ROPE_THETA=10_000.0
@@ -91,11 +91,11 @@ def get_config() -> ExperimentConfig:
     # Dataset: Connects to your H5 extraction
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
         train_csv=f"{CSV_BASE}/train.csv",
-        # val_csv=f"{CSV_BASE}/val.csv",
-        val_csv=f"{CSV_BASE}/test.csv",
+        val_csv=f"{CSV_BASE}/val.csv",
+        # val_csv=f"{CSV_BASE}/test.csv",
         features_dir=FEATURES_DIR,
-        # label_col_name="label",
-        label_col_name="is_tumor",
+        label_col_name="label",
+        # label_col_name="is_tumor",
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
         class_weights=CLASS_WEIGHTS,
