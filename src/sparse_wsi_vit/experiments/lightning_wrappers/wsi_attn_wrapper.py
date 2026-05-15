@@ -1,4 +1,5 @@
 import gc
+import time
 
 import torch
 import torchmetrics
@@ -119,8 +120,15 @@ class WSIAttnWrapper(LightningWrapperBase):
         gc.collect()
         torch.cuda.empty_cache()
         self._maybe_crop_batch(batch, self.training_crop_tokens)
+
+        t0 = time.perf_counter()
         loss, _, output_dict = self._step(batch, self.train_acc)
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        step_ms = (time.perf_counter() - t0) * 1000
+
         batch_size = batch["input"].size(0)
+        num_patches = batch["input"].size(1)
         self.log(
             "train/loss",
             loss,
@@ -129,6 +137,8 @@ class WSIAttnWrapper(LightningWrapperBase):
             sync_dist=True,
             batch_size=batch_size,
         )
+        self.log("train/num_patches", float(num_patches), on_step=True, on_epoch=True, batch_size=batch_size)
+        self.log("train/step_ms", step_ms, on_step=True, on_epoch=True, batch_size=batch_size)
         logits = output_dict["logits"].squeeze(1)
         self.log("train/logits_mean", logits.mean(), batch_size=batch_size)
         if logits.numel() > 1:
@@ -175,10 +185,17 @@ class WSIAttnWrapper(LightningWrapperBase):
         gc.collect()
         torch.cuda.empty_cache()
         self._maybe_crop_batch(batch, self.eval_crop_tokens)
+
+        t0 = time.perf_counter()
         with torch.inference_mode():
             loss, preds, output_dict = self._step(batch, self.val_acc)
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        step_ms = (time.perf_counter() - t0) * 1000
+
         labels = batch["label"]
         batch_size = batch["input"].size(0)
+        num_patches = batch["input"].size(1)
         self.val_precision.update(preds, labels)
         self.val_recall.update(preds, labels)
         self.val_f1.update(preds, labels)
@@ -190,6 +207,8 @@ class WSIAttnWrapper(LightningWrapperBase):
             sync_dist=True,
             batch_size=batch_size,
         )
+        self.log("val/num_patches", float(num_patches), on_epoch=True, batch_size=batch_size)
+        self.log("val/step_ms", step_ms, on_epoch=True, batch_size=batch_size)
         logits = output_dict["logits"].squeeze(1)
         self.log("val/logits_mean", logits.mean(), on_epoch=True, batch_size=batch_size)
         if logits.numel() > 1:

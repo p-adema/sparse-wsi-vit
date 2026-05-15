@@ -96,12 +96,15 @@ class AttentionMapCallback(pl.callbacks.Callback):
         mask_fig = self._plot_block_mask(target, seq_len)
 
         cls_fig = None
+        hilbert_fig = None
         coords = batch.get("coords")
-        if self._captured_qkv is not None and coords is not None:
-            cls_fig = self._plot_cls_attention(target, coords)
+        if coords is not None:
+            hilbert_fig = self._plot_hilbert_curve(coords, target.chunk_size)
+            if self._captured_qkv is not None:
+                cls_fig = self._plot_cls_attention(target, coords)
 
         self._captured_qkv = None
-        self._log_figures(trainer, mask_fig, cls_fig)
+        self._log_figures(trainer, mask_fig, cls_fig, hilbert_fig)
 
     # ------------------------------------------------------------------
     # Logging
@@ -112,12 +115,14 @@ class AttentionMapCallback(pl.callbacks.Callback):
         trainer: pl.Trainer,
         mask_fig: plt.Figure,
         cls_fig: plt.Figure | None,
+        hilbert_fig: plt.Figure | None = None,
     ) -> None:
+        figs = [mask_fig, cls_fig, hilbert_fig]
         logger = trainer.logger
         if logger is None or not hasattr(logger, "experiment"):
-            plt.close(mask_fig)
-            if cls_fig is not None:
-                plt.close(cls_fig)
+            for f in figs:
+                if f is not None:
+                    plt.close(f)
             return
 
         try:
@@ -126,11 +131,13 @@ class AttentionMapCallback(pl.callbacks.Callback):
             log_dict: dict = {"val/block_mask": wandb.Image(mask_fig)}
             if cls_fig is not None:
                 log_dict["val/cls_spatial_attention"] = wandb.Image(cls_fig)
+            if hilbert_fig is not None:
+                log_dict["val/hilbert_curve"] = wandb.Image(hilbert_fig)
             logger.experiment.log(log_dict, step=trainer.global_step)
         finally:
-            plt.close(mask_fig)
-            if cls_fig is not None:
-                plt.close(cls_fig)
+            for f in figs:
+                if f is not None:
+                    plt.close(f)
 
     # ------------------------------------------------------------------
     # Block mask plot
@@ -189,6 +196,68 @@ class AttentionMapCallback(pl.callbacks.Callback):
             ax.axhline(y=b, color="green", linewidth=1, linestyle="--")
             ax.axvline(x=b, color="green", linewidth=1, linestyle="--")
 
+        fig.tight_layout()
+        return fig
+
+    # ------------------------------------------------------------------
+    # Hilbert curve plot
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _plot_hilbert_curve(
+        coords: Tensor,
+        chunk_size: int,
+    ) -> plt.Figure:
+        coords_dev = coords[:1]
+        sort_idx = hilbert_sort(coords_dev)
+        orig = coords[0].cpu().numpy()
+        order = sort_idx[0].cpu().numpy()
+        sorted_xy = orig[order]
+        num_patches = len(order)
+        num_chunks = (num_patches + chunk_size - 1) // chunk_size
+
+        fig, axes = plt.subplots(1, 2, figsize=(16, 7))
+
+        # Left: patches colored by Hilbert position
+        ax = axes[0]
+        scatter = ax.scatter(
+            orig[:, 0],
+            orig[:, 1],
+            c=np.arange(num_patches)[np.argsort(order)],
+            cmap="viridis",
+            s=2,
+            alpha=0.8,
+        )
+        fig.colorbar(scatter, ax=ax, label="Hilbert position")
+        ax.set_xlabel("x (pixels)")
+        ax.set_ylabel("y (pixels)")
+        ax.set_title(f"Hilbert sort order ({num_patches} patches)")
+        ax.set_aspect("equal")
+        ax.invert_yaxis()
+
+        # Right: patches colored by chunk assignment
+        ax = axes[1]
+        chunk_ids = np.zeros(num_patches, dtype=np.int32)
+        for i, idx in enumerate(order):
+            chunk_ids[idx] = i // chunk_size
+        scatter = ax.scatter(
+            orig[:, 0],
+            orig[:, 1],
+            c=chunk_ids,
+            cmap="tab20",
+            s=2,
+            alpha=0.8,
+        )
+        fig.colorbar(scatter, ax=ax, label="Chunk ID")
+        ax.set_xlabel("x (pixels)")
+        ax.set_ylabel("y (pixels)")
+        ax.set_title(
+            f"Chunk assignment ({num_chunks} chunks of {chunk_size})"
+        )
+        ax.set_aspect("equal")
+        ax.invert_yaxis()
+
+        fig.suptitle("Hilbert space-filling curve", fontsize=12)
         fig.tight_layout()
         return fig
 
