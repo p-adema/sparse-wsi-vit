@@ -31,7 +31,7 @@ TARGET_OPTIONS = ("normal", "tumor")
 FEATURES_DIR = "../camelyon-emb"
 DOWNSCALE_BLOCK = 1
 FEATURES_NAME = "patches"  # "patches" or "cls"
-FEATURES_SCALE = 224
+FEATURES_SCALE = int(os.environ.get("FEATURES_SCALE", 224))
 
 train_csv = str(CSV_TRAIN_FOLD / "train.csv")
 print(f"{train_csv=}")
