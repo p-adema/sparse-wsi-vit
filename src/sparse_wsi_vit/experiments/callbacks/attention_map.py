@@ -290,8 +290,8 @@ class AttentionMapCallback(pl.callbacks.Callback):
         )
 
         with torch.no_grad():
-            q_patch = attn.rope(q[:1, :, num_cls:], sorted_coords)
-            k_patch = attn.rope(k[:1, :, num_cls:], sorted_coords)
+            q_patch = attn.rope(q[:1, :, num_cls:].transpose(1, 2), sorted_coords).transpose(1, 2)
+            k_patch = attn.rope(k[:1, :, num_cls:].transpose(1, 2), sorted_coords).transpose(1, 2)
 
             q_full = torch.cat([q[:1, :, :num_cls], q_patch], dim=2)
             k_full = torch.cat([k[:1, :, :num_cls], k_patch], dim=2)
