@@ -96,17 +96,15 @@ class DeepSeekSparseAttention(nn.Module):
                 )
 
             if num_cls > 0:
-                q = torch.cat(
-                    [q[:, :, :num_cls], self.rope(q[:, :, num_cls:], coords)],
-                    dim=2,
-                )
-                k = torch.cat(
-                    [k[:, :, :num_cls], self.rope(k[:, :, num_cls:], coords)],
-                    dim=2,
-                )
+                q_patch = q[:, :, num_cls:].permute(0, 2, 1, 3)  # (B, L, H, head_dim)
+                k_patch = k[:, :, num_cls:].permute(0, 2, 1, 3)
+                q_patch = self.rope(q_patch, coords).permute(0, 2, 1, 3)  # back to (B, H, L, head_dim)
+                k_patch = self.rope(k_patch, coords).permute(0, 2, 1, 3)
+                q = torch.cat([q[:, :, :num_cls], q_patch], dim=2)
+                k = torch.cat([k[:, :, :num_cls], k_patch], dim=2)
             else:
-                q = self.rope(q, coords)
-                k = self.rope(k, coords)
+                q = self.rope(q.permute(0, 2, 1, 3), coords).permute(0, 2, 1, 3)
+                k = self.rope(k.permute(0, 2, 1, 3), coords).permute(0, 2, 1, 3)
 
         k = k[:, 0]   # (B, T, head_dim)
 
