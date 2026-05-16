@@ -121,13 +121,15 @@ def construct_trainer(
         pl_callbacks.Timer(),
         # Progress bar for SLURM/non-TTY environments - prints training progress with it/s
         pl_callbacks.TQDMProgressBar(refresh_rate=10),
+        # Early stopping
+        pl_callbacks.EarlyStopping("val/acc", verbose=True, patience=5),
         # Wandb selective checkpoint uploader
-        WandbSelectiveCheckpointUploader(
-            upload_best=True,
-            upload_last=True,
-            remove_local_after_upload=False,
-            keep_last_k_versions=2,
-        ),
+        # WandbSelectiveCheckpointUploader(
+        #     upload_best=True,
+        #     upload_last=True,
+        #     remove_local_after_upload=False,
+        #     keep_last_k_versions=2,
+        # ),
         # Wandb cache cleanup callback to prevent W&B cache from growing too large (Disk Space OOM errors)
         WandbCacheCleanupCallback(
             max_cache_size="5GB",
