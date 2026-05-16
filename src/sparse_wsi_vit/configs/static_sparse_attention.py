@@ -100,8 +100,8 @@ def get_config() -> ExperimentConfig:
         num_workers=NUM_WORKERS,
         class_weights=CLASS_WEIGHTS,
         worker_prefetch=WORKER_PREFETCH,
-        features_name="patches_56x56",
-        coords_name="coords_56x56",
+        features_name="patches_112x112",
+        coords_name="coords_112x112",
     )
 
     config.net=LazyConfig(SparseViT5SlideEncoder)(
