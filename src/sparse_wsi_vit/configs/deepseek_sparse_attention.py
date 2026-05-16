@@ -4,6 +4,8 @@ Usage:
     python -m sparse-wsi-vit.experiments.run --config configs/deepseek_sparse_attention.py
 """
 
+import datetime
+
 import torch
 from pathlib import Path
 
@@ -20,9 +22,16 @@ from sparse_wsi_vit.experiments.lightning_wrappers.mil_wrapper import MILWrapper
 from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import WSIAttnWrapper
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 
+PIN_MEMORY = True
+
 # ─── Data Details ──────────────────────────────────────────────
-CSV_BASE   = Path.home() / "splits/camelyon/full"
+CSV_TRAIN_FOLD = Path.home() / "splits/camelyon/full"
+TARGET_NAME = "is_tumor"
+TARGET_OPTIONS = ("normal", "tumor")
 FEATURES_DIR = Path.home() / "camelyon-emb/"
+DOWNSCALE_BLOCK = 1
+FEATURES_NAME = "cls"  # "patches" or "cls"
+FEATURES_SCALE = 224
 
 SPARSE_ATTN = "dsa"
 
@@ -32,9 +41,9 @@ NUM_WORKERS = 4
 IN_FEATURES = 1280
 OUT_FEATURES = 1  # Binary task
 PRECISION = "bf16-mixed"
-EMBED_DIM=384
-NUM_HEADS=6            # embed_dim // num_heads=64
-DEPTH=6
+EMBED_DIM=256
+NUM_HEADS=4            # embed_dim // num_heads=64
+DEPTH=3
 NUM_CLS=4
 
 MLP_RATIO=4.0
@@ -62,8 +71,15 @@ TOP_K = 128
 BLOCK_Q = 32
 BLOCK_K = 32
 BLOCK_D = 32   
+
 ROPE_THETA=10_000.0
-ROPE_COORD_HIGH=100_000.0
+ROPE_DYNAMIC_HIGH = FEATURES_SCALE * DOWNSCALE_BLOCK
+
+PATIENCE = 10  # Early stopping
+
+# Training will stop after 9h30m, after which testing will start.
+# Set job duration to ~11h to ensure testing is not interrupted
+MAX_DURATION = datetime.timedelta(hours=9, minutes=30)
 
 
 def get_config() -> ExperimentConfig:
@@ -73,16 +89,20 @@ def get_config() -> ExperimentConfig:
 
     # Dataset: Connects to your H5 extraction
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
-        train_csv    = str(CSV_BASE / "train.csv"),
-        val_csv      = str(CSV_BASE / "test.csv"),
-        features_dir = str(FEATURES_DIR),
-        label_col_name = "is_tumor",
-        batch_size   = BATCH_SIZE,
-        num_workers  = NUM_WORKERS,
+        train_csv=f"{CSV_TRAIN_FOLD}/train.csv",
+        val_csv=f"{CSV_TRAIN_FOLD}/val.csv",
+        test_csv=f"{CSV_TRAIN_FOLD}/test.csv",
+        features_dir=FEATURES_DIR,
+        label_col_name=TARGET_NAME,
+        labels=TARGET_OPTIONS,
+        batch_size=BATCH_SIZE,
+        num_workers=NUM_WORKERS,
         class_weights=CLASS_WEIGHTS,
-        worker_prefetch = WORKER_PREFETCH,
-        features_name="cls_224x224",
-        coords_name="coords_224x224",
+        worker_prefetch=WORKER_PREFETCH,
+        features_name=f"{FEATURES_NAME}_{FEATURES_SCALE}x{FEATURES_SCALE}",
+        coords_name=f"coords_{FEATURES_SCALE}x{FEATURES_SCALE}",
+        downscale_block=DOWNSCALE_BLOCK,
+        pin_memory=PIN_MEMORY,
     )
 
     # Network: SparseViT5SlideEncoder
@@ -102,7 +122,7 @@ def get_config() -> ExperimentConfig:
         BLOCK_K=BLOCK_K,
         BLOCK_D=BLOCK_D,
         rope_theta=ROPE_THETA,
-        rope_coord_high=ROPE_COORD_HIGH,
+        rope_coord_high=ROPE_DYNAMIC_HIGH,
         # Shared kwargs
         mlp_ratio=MLP_RATIO,
         attn_dropout=ATTN_DROPOUT,
@@ -116,8 +136,6 @@ def get_config() -> ExperimentConfig:
     # Lightning wrapper mappings
     config.lightning_wrapper_class = LazyConfig(WSIAttnWrapper)(
         use_bce_loss=(OUT_FEATURES == 1),
-        training_crop_tokens=None,
-        eval_crop_tokens=None,
         compile_mode="max-autotune-no-cudagraphs",
     )
 
@@ -142,6 +160,8 @@ def get_config() -> ExperimentConfig:
         warmup_iterations_percentage=WARMUP_ITERATIONS_PERCENTAGE,
         total_iterations=TRAINING_ITERATIONS,
         mode="max",
+        patience=PATIENCE,
+        max_duration=MAX_DURATION,
     )
 
     # W&B Logging

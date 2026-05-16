@@ -13,7 +13,10 @@ from torch.utils.checkpoint import checkpoint
 
 from sparse_wsi_vit.models.vit_5.models_vit5 import Block, RMSNorm
 from sparse_wsi_vit.models.deepseek_sparse_attention import DeepseekSparseAttentionAdapter
-from sparse_wsi_vit.models.static_sparse_attention import StaticSparseAttentionAdapter
+from sparse_wsi_vit.models.static_sparse_attention import (
+    StaticSparseAttentionAdapter,
+    hilbert_sort,
+)
 
 
 _SPARSE_ATTN_TYPES = ("static", "dsa")
@@ -90,6 +93,8 @@ class SparseViT5SlideEncoder(nn.Module):
         init_scale: float = 1e-4,
         # Memory
         gradient_checkpointing: bool = False,
+        # patch_ordering
+        use_hilbert_sort = False
     ) -> None:
         super().__init__()
 
@@ -103,6 +108,7 @@ class SparseViT5SlideEncoder(nn.Module):
         self.embed_dim = embed_dim
         self.out_features = out_features
         self.gradient_checkpointing = gradient_checkpointing
+        self.use_hilbert_sort = use_hilbert_sort
 
         self.input_proj = nn.Linear(in_features, embed_dim)
         nn.init.xavier_uniform_(self.input_proj.weight)
@@ -197,6 +203,11 @@ class SparseViT5SlideEncoder(nn.Module):
         B = x.shape[0]
 
         x = self.input_proj(x)  # (B, N, embed_dim)
+
+        if coords is not None and self.use_hilbert_sort:
+            sort_idx = hilbert_sort(coords)
+            x = x.gather(1, sort_idx.unsqueeze(-1).expand_as(x))
+            coords = coords.gather(1, sort_idx.unsqueeze(-1).expand(-1, -1, 2))
 
         cls = self.cls_tokens.expand(B, -1, -1)  # (B, num_cls, embed_dim)
         x = torch.cat([cls, x], dim=1)            # (B, num_cls + N, embed_dim)

@@ -118,17 +118,24 @@ def construct_trainer(
         # Learning rate monitor callback
         pl_callbacks.LearningRateMonitor(log_weight_decay=True),
         # Timer callback
-        pl_callbacks.Timer(),
+        pl_callbacks.Timer(cfg.scheduler.max_duration, verbose=True),
         # Progress bar for SLURM/non-TTY environments - prints training progress with it/s
-        pl_callbacks.TQDMProgressBar(refresh_rate=10),
-        # Wandb selective checkpoint uploader
-        WandbSelectiveCheckpointUploader(
-            upload_best=True,
-            upload_last=True,
-            remove_local_after_upload=False,
-            keep_last_k_versions=2,
+        pl_callbacks.TQDMProgressBar(refresh_rate=10, leave=True),
+        # Early stopping
+        pl_callbacks.EarlyStopping(
+            monitor,
+            verbose=True,
+            patience=cfg.scheduler.patience,
+            mode=cfg.scheduler.mode,
         ),
-        # Wandb cache cleanup callback to prevent W&B cache from growing too large (Disk Space OOM errors)
+        # Wandb selective checkpoint uploader (not used)
+        # WandbSelectiveCheckpointUploader(
+        #     upload_best=True,
+        #     upload_last=True,
+        #     remove_local_after_upload=False,
+        #     keep_last_k_versions=2,
+        # ),
+        # Wandb cache cleanup callback to prevent W&B cache from growing too large
         WandbCacheCleanupCallback(
             max_cache_size="5GB",
             every_n_epochs=2,
