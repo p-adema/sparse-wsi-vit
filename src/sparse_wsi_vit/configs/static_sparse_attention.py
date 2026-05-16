@@ -5,7 +5,10 @@ Usage:
 """
 
 import torch
+import datetime
+
 from pathlib import Path
+
 import pandas as pd
 
 from sparse_wsi_vit.experiments.default_cfg import (
@@ -22,21 +25,30 @@ from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDat
 from sparse_wsi_vit.experiments.callbacks import AttentionMapCallback
 
 # ─── Data Details ──────────────────────────────────────────────
-CSV_BASE=Path("../splits/camelyon/0")
-FEATURES_DIR="../camelyon-emb/"
+CSV_TRAIN_FOLD = "../splits/camelyon/full"
+TARGET_NAME = "is_tumor"
+TARGET_OPTIONS = ("normal", "tumor")
+FEATURES_DIR = "../camelyon-emb"
+DOWNSCALE_BLOCK = 1
+FEATURES_NAME = "patches"  # "patches" or "cls"
+FEATURES_SCALE = 224
 
-train_csv = str(CSV_BASE / "train.csv")
+train_csv = str(CSV_TRAIN_FOLD / "train.csv")
 print(f"{train_csv=}")
-val_csv = str(CSV_BASE / "val.csv")
+val_csv = str(CSV_TRAIN_FOLD / "val.csv")
 print(f"{val_csv=}")
+test_csv = str(CSV_TRAIN_FOLD / "test.csv")
+print(f"{test_csv=}")
 
 train_slides = set(pd.read_csv(train_csv)["slidename"])
 val_slides = set(pd.read_csv(val_csv)["slidename"])
 
-overlap = train_slides & val_slides
+overlap_train_val = train_slides & val_slides
+overlap_test_val = test_slides & val_slides
+overlap_train_test = test_slides & train_slides
 print(f"Train: {len(train_slides)}, Val: {len(val_slides)}, Overlap: {len(overlap)}")
-if overlap:
-    print("Overlapping slides:", overlap)
+if overlap_train_val or overlap_test_val or overlap_train_test:
+    print("Overlapping slides:", overlap_train_val + overlap_test_val + overlap_train_test)
 
 
 # ─── Sparse attention type ───────────────────────────────────────────────────
@@ -44,41 +56,42 @@ SPARSE_ATTN="static"
 
 # ─── Shared hyperparameters ──────────────────────────────────────────────────
 BATCH_SIZE=1
-NUM_WORKERS=4
+NUM_WORKERS = 8 if FEATURES_SCALE == 224 else 1
+WORKER_PREFETCH=2
+CLASS_WEIGHTS=True
 IN_FEATURES=1280
 OUT_FEATURES=1
 PRECISION="bf16-mixed"
-EMBED_DIM=256
-NUM_HEADS=4            # embed_dim // num_heads=64
-DEPTH=3
-NUM_CLS=2
+GRADIENT_CHECKPOINTING=True
 
+DEPTH=3
+HIDDEN_SIZE=256
+NUM_HEADS=4            # embed_dim // num_heads=64
+ROPE_DYNAMIC_HIGH = FEATURES_SCALE * DOWNSCALE_BLOCK
+
+NUM_CLS=2
 MLP_RATIO=4.0
 PROJ_DROPOUT=0.2
 DROP_PATH_RATE=0.1
 LAYER_SCALE=True
 INIT_SCALE=1e-4
 
-GRADIENT_CHECKPOINTING=True
-
-USE_HILBERT_SORT = True
-
+TRAINING_ITERATIONS=1000
 WARMUP_ITERATIONS_PERCENTAGE=0.05
 LEARNING_RATE=2e-4
 WEIGHT_DECAY=1e-2
-TRAINING_ITERATIONS=2000
 GRAD_CLIP=1.0
-ACCUMULATE_GRAD_STEPS=8
-CLASS_WEIGHTS=True
-WORKER_PREFETCH=2
+ACCUMULATE_GRAD_STEPS=5
+PATIENCE = 10
+MAX_DURATION = datetime.timedelta(hours=9, minutes=30)
+
 
 # ─── StaticSparseAttention-specific ──────────────────────────────────────────
 WINDOW_SIZE=4            # neighbouring chunks on each side
 CHUNK_SIZE=256           # patches per logical chunk (must be multiple of FLEX_BLOCK_SIZE)
 FLEX_BLOCK_SIZE=128      # FlexAttention kernel tile size
 ROPE_THETA=10_000.0
-ROPE_COORD_HIGH=112.0
-
+USE_HILBERT_SORT = True
 
 def get_config() -> ExperimentConfig:
     config = ExperimentConfig()
@@ -89,20 +102,24 @@ def get_config() -> ExperimentConfig:
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
         train_csv=f"{CSV_BASE}/train.csv",
         val_csv=f"{CSV_BASE}/val.csv",
+        test_csv=f"{CSV_TRAIN_FOLD}/test.csv",
         features_dir=FEATURES_DIR,
-        label_col_name="label",
+        label_col_name=TARGET_NAME,
+        labels=TARGET_OPTIONS,
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
         class_weights=CLASS_WEIGHTS,
         worker_prefetch=WORKER_PREFETCH,
-        features_name="patches_112x112",
-        coords_name="coords_112x112",
+        features_name=f"{FEATURES_NAME}_{FEATURES_SCALE}x{FEATURES_SCALE}",
+        coords_name=f"coords_{FEATURES_SCALE}x{FEATURES_SCALE}",
+        downscale_block=DOWNSCALE_BLOCK,
+        pin_memory=PIN_MEMORY,
     )
 
     config.net=LazyConfig(SparseViT5SlideEncoder)(
         in_features=IN_FEATURES,
         out_features=OUT_FEATURES,
-        embed_dim=EMBED_DIM,
+        embed_dim=HIDDEN_SIZE,
         num_heads=NUM_HEADS,
         depth=DEPTH,
         num_cls=NUM_CLS,
@@ -112,7 +129,7 @@ def get_config() -> ExperimentConfig:
         chunk_size=CHUNK_SIZE,
         flex_block_size=FLEX_BLOCK_SIZE,
         rope_theta=ROPE_THETA,
-        rope_coord_high=ROPE_COORD_HIGH,
+        rope_coord_high=ROPE_DYNAMIC_HIGH,
         # Shared kwargs
         mlp_ratio=MLP_RATIO,
         proj_dropout=PROJ_DROPOUT,
@@ -153,6 +170,8 @@ def get_config() -> ExperimentConfig:
         warmup_iterations_percentage=WARMUP_ITERATIONS_PERCENTAGE,
         total_iterations=TRAINING_ITERATIONS,
         mode="max",
+        patience=PATIENCE,
+        max_duration=MAX_DURATION,
     )
 
     # W&B Logging
