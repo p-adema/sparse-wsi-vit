@@ -4,6 +4,8 @@ Usage:
     uv run experiments/run.py --config src/sparse_wsi_vit/configs/baseline_vit5dense_preembed_tcga.py
 """
 
+import datetime
+
 import torch
 
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
@@ -52,6 +54,9 @@ WEIGHT_DECAY = 1e-4
 GRAD_CLIP = 1.0
 ACCUMULATE_GRAD_STEPS = 5
 PATIENCE = 10  # Early stopping
+# Training will stop after 9h30m, after which testing will start.
+# Set job duration to ~11h to ensure testing is not interrupted
+MAX_DURATION = datetime.timedelta(hours=9, minutes=30)
 
 
 def get_config() -> ExperimentConfig:
@@ -116,6 +121,7 @@ def get_config() -> ExperimentConfig:
         total_iterations=TRAINING_ITERATIONS,
         mode="max",
         patience=PATIENCE,
+        max_duration=MAX_DURATION,
     )
 
     # W&B Logging
