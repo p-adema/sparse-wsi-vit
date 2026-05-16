@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -e
-
+# todo: scheduler patience
 nq uv run experiments/run.py --config src/sparse_wsi_vit/configs/baseline_vit5dense_preembed_camelyon.py \
   dataset.downscale_block=2 dataset.features_name=cls_224x224 dataset.label_col_name=is_tumor \
   train.iterations=8000 scheduler.total_iterations=8000 dataset.pin_memory=False

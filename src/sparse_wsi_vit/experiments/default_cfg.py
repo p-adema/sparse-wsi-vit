@@ -45,6 +45,7 @@ class SchedulerConfig:
     total_iterations: int = PLACEHOLDER
     mode: str = "max"
     monitor: Optional[str] = None  # in case we'd like to track e.g. val/iou
+    patience: int = 10  # Early stopping epochs without improvement
 
 
 @dataclass

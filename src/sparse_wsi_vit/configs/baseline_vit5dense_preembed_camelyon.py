@@ -51,6 +51,7 @@ LEARNING_RATE = 2e-4
 WEIGHT_DECAY = 1e-4
 GRAD_CLIP = 1.0
 ACCUMULATE_GRAD_STEPS = 5
+PATIENCE = 10  # Early stopping
 
 
 def get_config() -> ExperimentConfig:
@@ -114,6 +115,7 @@ def get_config() -> ExperimentConfig:
         warmup_iterations_percentage=WARMUP_ITERATIONS_PERCENTAGE,
         total_iterations=TRAINING_ITERATIONS,
         mode="max",
+        patience=PATIENCE,
     )
 
     # W&B Logging
