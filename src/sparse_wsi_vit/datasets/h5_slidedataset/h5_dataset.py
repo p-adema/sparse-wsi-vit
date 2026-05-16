@@ -24,6 +24,7 @@ class H5FeatureBagDataset(Dataset):
         coords_name: str = "coords",
         flatten_block: bool = True,
         downscale_block: int = 1,
+        labels: tuple[str, ...] | None = None,
     ):
         """
         Args:
@@ -49,7 +50,10 @@ class H5FeatureBagDataset(Dataset):
         df = pd.read_csv(csv_path)
 
         # Mapping for string to int labels
-        self.label_map = {}
+        if labels is None:
+            self.label_map = {}
+        else:
+            self.label_map = {lbl: i for i, lbl in enumerate(labels)}
         label_counts = {}
 
         # Keep only slides for which the feature .h5 file actually exist
@@ -60,9 +64,11 @@ class H5FeatureBagDataset(Dataset):
 
             raw_label = row.get(label_col_name)
             if h5_path.exists() and pd.notna(raw_label):
-                # Dynamically map strings to integers if required
+                # Dynamically map strings to integers if required and no provided map
                 if isinstance(raw_label, str):
                     if raw_label not in self.label_map:
+                        if labels is not None:
+                            raise ValueError(f"Unknown {raw_label=} given {labels=}")
                         self.label_map[raw_label] = len(self.label_map)
                     mapped_label = self.label_map[raw_label]
                 else:
@@ -77,6 +83,9 @@ class H5FeatureBagDataset(Dataset):
                         "h5_path": h5_path,
                     }
                 )
+            else:
+                print(f"Warning: invalid {h5_path.resolve()=}")
+        assert len(valid_slides) > 0, f"Probably misconfigured {features_dir=} {df=}"
         per_cls = len(valid_slides) / len(label_counts)  # N / |C|
         if self.class_weights:
             for slide in valid_slides:
@@ -85,7 +94,6 @@ class H5FeatureBagDataset(Dataset):
 
         self.slides = valid_slides
         print(f"Loaded {len(self.slides)} valid WSI feature bags from {features_dir}")
-        assert len(self.slides) > 0, "Probably misconfigured dataset!"
 
     def __len__(self) -> int:
         """Return the number of valid slides in the dataset."""

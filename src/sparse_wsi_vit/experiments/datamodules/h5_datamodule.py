@@ -60,6 +60,7 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         self,
         train_csv: str,
         val_csv: str,
+        test_csv: str | None = None,
         features_dir: str = "",
         label_col_name: str = "label",
         batch_size: int = 1,
@@ -71,12 +72,15 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         flatten_block: bool = True,
         downscale_block: int = 1,
         output_channels: int = 1,
+        labels: tuple[str, ...] | None = None,
     ):
         super().__init__()
         self.train_csv = train_csv
         self.val_csv = val_csv
+        self.test_csv = test_csv
         self.features_dir = features_dir
         self.label_col_name = label_col_name
+        self.labels = labels
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.input_channels = 1280
@@ -87,6 +91,9 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         self.flatten_block = flatten_block
         self.downscale_block = downscale_block
         self.output_channels = output_channels
+        self.train_dataset: H5FeatureBagDataset | None = None
+        self.val_dataset: H5FeatureBagDataset | None = None
+        self.test_dataset: H5FeatureBagDataset | None = None
 
     def setup(self, stage: str | None = None) -> None:
         """Instantiate train and validation datasets.
@@ -95,28 +102,32 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
             stage: Either ``"fit"`` or ``None``; only ``"fit"`` is supported.
         """
         if stage in ("fit", None):
+            dataset_args = {
+                "features_dir": self.features_dir,
+                "label_col_name": self.label_col_name,
+                "class_weights": self.class_weights,
+                "features_name": self.features_name,
+                "coords_name": self.coords_name,
+                "flatten_block": self.flatten_block,
+                "downscale_block": self.downscale_block,
+                "labels": self.labels,
+            }
             self.train_dataset = H5FeatureBagDataset(
-                csv_path=self.train_csv,
-                features_dir=self.features_dir,
-                label_col_name=self.label_col_name,
-                class_weights=self.class_weights,
-                features_name=self.features_name,
-                coords_name=self.coords_name,
-                flatten_block=self.flatten_block,
-                downscale_block=self.downscale_block,
+                csv_path=self.train_csv, **dataset_args
             )
             self.val_dataset = H5FeatureBagDataset(
-                csv_path=self.val_csv,
-                features_dir=self.features_dir,
-                label_col_name=self.label_col_name,
-                features_name=self.features_name,
-                coords_name=self.coords_name,
-                flatten_block=self.flatten_block,
-                downscale_block=self.downscale_block,
+                csv_path=self.val_csv, **dataset_args
             )
+            if self.test_csv is not None:
+                self.test_dataset = H5FeatureBagDataset(
+                    csv_path=self.test_csv, **dataset_args
+                )
+            else:
+                self.test_dataset = None
 
     def train_dataloader(self) -> DataLoader:
         """Return the training DataLoader."""
+        assert self.train_dataset is not None, "Must have completed setup first!"
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
@@ -129,8 +140,23 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
 
     def val_dataloader(self) -> DataLoader:
         """Return the validation DataLoader."""
+        assert self.val_dataset is not None, "Must have completed setup first!"
         return DataLoader(
             self.val_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            collate_fn=mil_collate_fn,
+            pin_memory=True,
+            prefetch_factor=self.worker_prefetch,
+        )
+
+    def test_dataloader(self) -> DataLoader:
+        if self.test_dataset is None:
+            print("WARNING: no test dataloader, testing on validation test!")
+            return self.val_dataloader()
+        return DataLoader(
+            self.test_dataset,
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,

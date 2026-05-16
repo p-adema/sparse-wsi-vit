@@ -231,6 +231,7 @@ def main() -> None:
         if best_ckpt_path:
             best_ckpt_path = str(best_ckpt_path)
         if best_ckpt_path and os.path.isfile(best_ckpt_path):
+            print(f"[checkpoint] Loaded best model from {best_ckpt_path}")
             model.load_state_dict(torch.load(best_ckpt_path)["state_dict"])
         else:
             print(

@@ -20,20 +20,28 @@ from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
 from sparse_wsi_vit.models.vit5_dense import VitDensePreEmbedded
 
 # ─── Data Details ──────────────────────────────────────────────
-CSV_BASE = "../splits/camelyon/full"
+CSV_TRAIN_FOLD = "../splits/camelyon/full"
+TARGET_NAME = "is_tumor"
+TARGET_OPTIONS = ("normal", "tumor")
 FEATURES_DIR = "../camelyon-emb"
 DOWNSCALE_BLOCK = 1
+FEATURES_NAME = "cls"  # "patches" or "cls"
+FEATURES_SCALE = 224
 
 # ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1
-NUM_WORKERS = 8  # Actually, if you use the 224 features, it fits into RAM, no disk use
+NUM_WORKERS = 8 if FEATURES_SCALE == 224 else 1
 WORKER_PREFETCH = 5
 CLASS_WEIGHTS = True
 IN_FEATURES = 1280
 OUT_FEATURES = 1  # Binary tasks
 PRECISION = "bf16-mixed"
 CHECKPOINT_ACTIVATIONS = True
-ROPE_DYNAMIC_HIGH = 100_000
+
+DEPTH = 3
+HIDDEN_SIZE = 256
+NUM_HEADS = 4
+ROPE_DYNAMIC_HIGH = FEATURES_SCALE * DOWNSCALE_BLOCK
 
 TRAINING_ITERATIONS = 1_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
@@ -50,16 +58,18 @@ def get_config() -> ExperimentConfig:
 
     # Dataset: Connects to your H5 extraction
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
-        train_csv=f"{CSV_BASE}/train.csv",
-        val_csv=f"{CSV_BASE}/test.csv",
+        train_csv=f"{CSV_TRAIN_FOLD}/train.csv",
+        val_csv=f"{CSV_TRAIN_FOLD}/val.csv",
+        test_csv=f"{CSV_TRAIN_FOLD}/test.csv",
         features_dir=FEATURES_DIR,
-        label_col_name="is_tumor",
+        label_col_name=TARGET_NAME,
+        labels=TARGET_OPTIONS,
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
         class_weights=CLASS_WEIGHTS,
         worker_prefetch=WORKER_PREFETCH,
-        features_name="patches_224x224",  # low resolution!
-        coords_name="coords_224x224",
+        features_name=f"{FEATURES_NAME}_{FEATURES_SCALE}x{FEATURES_SCALE}",
+        coords_name=f"coords_{FEATURES_SCALE}x{FEATURES_SCALE}",
         downscale_block=DOWNSCALE_BLOCK,
     )
 
@@ -68,15 +78,15 @@ def get_config() -> ExperimentConfig:
         in_features=IN_FEATURES,
         out_features=OUT_FEATURES,
         checkpoint_activations=CHECKPOINT_ACTIVATIONS,
-        downproj=384,
+        downproj=HIDDEN_SIZE,
         rope_dynamic_high=ROPE_DYNAMIC_HIGH,
+        num_heads=NUM_HEADS,
+        depth=DEPTH,
     )
 
     # Lightning wrapper mappings
     config.lightning_wrapper_class = LazyConfig(WSIAttnWrapper)(
         use_bce_loss=(OUT_FEATURES == 1),
-        training_crop_tokens=None,  # Don't crop here!
-        eval_crop_tokens=None,
         compile_mode="max-autotune-no-cudagraphs",
     )
 
