@@ -24,8 +24,10 @@ from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import WSIAt
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 from sparse_wsi_vit.experiments.callbacks import AttentionMapCallback
 
+PIN_MEMORY = True
+
 # ─── Data Details ──────────────────────────────────────────────
-CSV_TRAIN_FOLD = "../splits/camelyon/full"
+CSV_TRAIN_FOLD = Path("../splits/camelyon/full")
 TARGET_NAME = "is_tumor"
 TARGET_OPTIONS = ("normal", "tumor")
 FEATURES_DIR = "../camelyon-emb"
@@ -42,14 +44,15 @@ print(f"{test_csv=}")
 
 train_slides = set(pd.read_csv(train_csv)["slidename"])
 val_slides = set(pd.read_csv(val_csv)["slidename"])
+test_slides = set(pd.read_csv(test_csv)["slidename"])
 
 overlap_train_val = train_slides & val_slides
 overlap_test_val = test_slides & val_slides
 overlap_train_test = test_slides & train_slides
-print(f"Train: {len(train_slides)}, Val: {len(val_slides)}, Overlap: {len(overlap)}")
-if overlap_train_val or overlap_test_val or overlap_train_test:
-    print("Overlapping slides:", overlap_train_val + overlap_test_val + overlap_train_test)
 
+print(f"Train: {len(train_slides)}, Val: {len(val_slides)}, Test: {len(test_slides)}")
+if overlap_train_val or overlap_test_val or overlap_train_test:
+    print("Overlapping slides:", overlap_train_val | overlap_test_val | overlap_train_test)
 
 # ─── Sparse attention type ───────────────────────────────────────────────────
 SPARSE_ATTN="static"
@@ -100,9 +103,9 @@ def get_config() -> ExperimentConfig:
 
     # Dataset: Connects to your H5 extraction
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
-        train_csv=f"{CSV_BASE}/train.csv",
-        val_csv=f"{CSV_BASE}/val.csv",
-        test_csv=f"{CSV_TRAIN_FOLD}/test.csv",
+        train_csv=train_csv,
+        val_csv=val_csv,
+        test_csv=test_csv,
         features_dir=FEATURES_DIR,
         label_col_name=TARGET_NAME,
         labels=TARGET_OPTIONS,
