@@ -52,19 +52,19 @@ def _indexer_fwd(
             offs_d = d_block * BLOCK_D + tl.arange(0, BLOCK_D)
             mask_d = offs_d < D
 
-            Q_fp8 = tl.load(
+            Q = tl.load(
                 Q_ptr + pid_b*sqb + offs_t[:, None, None]*sqt
                       + offs_h[None, :, None]*sqh + offs_d[None, None, :]*sqd,
                 mask=mask_t[:, None, None] & mask_d[None, None, :], other=0.0,
             )  # (BLOCK_Q, H, BLOCK_D)
-            K_fp8 = tl.load(
+            K = tl.load(
                 K_ptr + pid_b*skb + offs_k[:, None, None]*skt
                       + offs_h[None, :, None]*skh + offs_d[None, None, :]*skd,
                 mask=mask_k[:, None, None] & mask_d[None, None, :], other=0.0,
             )  # (BLOCK_K, H, BLOCK_D)
 
-            Q = Q_fp8.to(tl.float16)  # (BLOCK_Q, H, BLOCK_D)
-            K = K_fp8.to(tl.float16)  # (BLOCK_K, H, BLOCK_D)
+            # Q = Q_fp8.to(tl.float16)  # (BLOCK_Q, H, BLOCK_D)
+            # K = K_fp8.to(tl.float16)  # (BLOCK_K, H, BLOCK_D)
 
             Q = Q * W[None, :, None]
             K = K * W[None, :, None]
@@ -80,7 +80,7 @@ def _indexer_fwd(
         block_scores = tl.where(mask_k[None, :], block_scores, float("-inf"))
 
         # Merge into running top-K buffer via column-mask + cumsum tie-break
-        for i in range(BLOCK_K):
+        for i in tl.static_range(0, BLOCK_K):
             col_mask = tl.arange(0, BLOCK_K) == i
 
             candidate_score = tl.sum(
@@ -371,8 +371,8 @@ class LightningIndexerFunction(torch.autograd.Function):
         svlb, svlt, svlk    = valid_ptr.stride()
         ssb, sst, ssk       = scores_ptr.stride()
 
-        q_fp8 = q_proj.detach().to(torch.float8_e4m3fn)
-        k_fp8 = k_proj.detach().to(torch.float8_e4m3fn)
+        q_fp8 = q_proj.detach().to(torch.float8_e5m2)
+        k_fp8 = k_proj.detach().to(torch.float8_e5m2)
 
         grid = (B, math.ceil(T / BLOCK_Q))
 
