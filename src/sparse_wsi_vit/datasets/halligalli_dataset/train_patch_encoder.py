@@ -212,9 +212,10 @@ def main():
     parser.add_argument("--shape_radius", type=int, default=20,
                         help="Radius of key shapes in training patches. "
                              "Should match --shape_radius used in extract_halligalli.py.")
-    parser.add_argument("--clutter_density", type=float, default=4.0)
+    parser.add_argument("--clutter_density", type=float, default=30.0,
+                        help="Should match --clutter_density used in extract_halligalli.py.")
     parser.add_argument("--embed_dim", type=int, default=256)
-    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--epochs", type=int, default=60)
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--num_workers", type=int, default=4)

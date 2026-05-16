@@ -180,15 +180,20 @@ def _extract_split(
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output_dir", type=Path, required=True)
-    parser.add_argument("--train_size", type=int, default=2000)
-    parser.add_argument("--val_size", type=int, default=400)
-    parser.add_argument("--test_size", type=int, default=400)
-    parser.add_argument("--image_size", type=int, default=2048)
-    parser.add_argument("--patch_size", type=int, default=64,
-                        help="Patch size in pixels.")
-    parser.add_argument("--clutter_density", type=float, default=4)
-    parser.add_argument("--shape_radius", type=int, default=None,
-                        help="Radius of key shapes in pixels. Defaults to image_size * 0.008.")
+    parser.add_argument("--train_size", type=int, default=10_000)
+    parser.add_argument("--val_size", type=int, default=2_000)
+    parser.add_argument("--test_size", type=int, default=1_000)
+    parser.add_argument("--image_size", type=int, default=1792)
+    parser.add_argument("--patch_size", type=int, default=224,
+                        help="Patch size in pixels (224 or 112).")
+    parser.add_argument("--clutter_density", type=float, default=30)
+    parser.add_argument("--shape_radius", type=int, default=20,
+                        help="Radius of key shapes in pixels. Should match train_patch_encoder.py.")
+    parser.add_argument(
+        "--randomize_key_positions",
+        action="store_true",
+        help="Place key shapes at random patch-interior-aligned positions (recommended).",
+    )
     parser.add_argument("--cnn_checkpoint", type=Path, required=True,
                         help="Path to ShapePatchCNN checkpoint produced by train_patch_encoder.py.")
     parser.add_argument("--batch_size", type=int, default=128)
@@ -205,20 +210,23 @@ def main():
     model = CNNPatchExtractor(args.cnn_checkpoint, device)
 
     generator_kwargs = {
-        "clutter_density": args.clutter_density,
-        "shape_radius":    args.shape_radius,
+        "clutter_density":         args.clutter_density,
+        "shape_radius":            args.shape_radius,
+        "randomize_key_positions": args.randomize_key_positions,
+        "patch_size":              args.patch_size,
     }
 
     metadata = {
-        "train_size":      args.train_size,
-        "val_size":        args.val_size,
-        "test_size":       args.test_size,
-        "image_size":      args.image_size,
-        "patch_size":      args.patch_size,
-        "clutter_density": args.clutter_density,
-        "shape_radius":    args.shape_radius,
-        "encoder":         f"ShapePatchCNN:{args.cnn_checkpoint.name}",
-        "feature_dim":     model.embed_dim,
+        "train_size":               args.train_size,
+        "val_size":                 args.val_size,
+        "test_size":                args.test_size,
+        "image_size":               args.image_size,
+        "patch_size":               args.patch_size,
+        "clutter_density":          args.clutter_density,
+        "shape_radius":             args.shape_radius,
+        "randomize_key_positions":  args.randomize_key_positions,
+        "encoder":                  f"ShapePatchCNN:{args.cnn_checkpoint.name}",
+        "feature_dim":              model.embed_dim,
     }
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))

@@ -26,8 +26,8 @@ class VitDensePreEmbedded(nn.Module):
         self,
         in_features: int = 1280,
         out_features: int = 1,
-        checkpoint_activations=False,
         downproj: int | None = None,
+        **vit5_kwargs,  # checkpoint_activations, depth, rope_dynamic_high, num_heads
     ):
         super().__init__()
         self.out_features = out_features
@@ -37,16 +37,13 @@ class VitDensePreEmbedded(nn.Module):
             num_classes=out_features,
             drop_rate=0.0,
             drop_path_rate=0.1,
-            # img_size=320,  # 320 * 320 = 102 400
             pre_embedded_input=True,
             ape=False,  # it's learnable, which breaks with variable size inputs.
             patch_size=1,  # each token is a patch, effectively
             rope=True,
             rope_dynamic=True,
             embed_dim=in_features if downproj is None else downproj,
-            num_heads=8,
-            depth=6,
-            checkpoint_activations=checkpoint_activations,
+            **vit5_kwargs,
         )
         self.down = nn.Linear(in_features, downproj) if downproj else None
 

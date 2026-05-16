@@ -4,43 +4,59 @@ Usage:
     uv run experiments/run.py --config src/sparse_wsi_vit/configs/baseline_vit5dense_preembed_tcga.py
 """
 
-import torch
-from pathlib import Path
+import datetime
 
+import torch
+
+from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 from sparse_wsi_vit.experiments.default_cfg import (
     ExperimentConfig,
     SchedulerConfig,
     TrainConfig,
     WandbConfig,
 )
-from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
-
-from sparse_wsi_vit.models.vit5_dense import VitDensePreEmbedded
 from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import (
     WSIAttnWrapper,
 )
-from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
+from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
+from sparse_wsi_vit.models.vit5_dense import VitDensePreEmbedded
+
+PIN_MEMORY = True
 
 # ─── Data Details ──────────────────────────────────────────────
-CSV_BASE = "../splits/camelyon/0"
+CSV_TRAIN_FOLD = "../splits/camelyon/full"
+TARGET_NAME = "is_tumor"
+TARGET_OPTIONS = ("normal", "tumor")
 FEATURES_DIR = "../camelyon-emb"
+DOWNSCALE_BLOCK = 1
+FEATURES_NAME = "cls"  # "patches" or "cls"
+FEATURES_SCALE = 224
 
 # ─── Hyperparameters ─────────────────────────────────────────────
-BATCH_SIZE = 1  # Standard for MIL bags
-NUM_WORKERS = 1  # Better for HDD or other slow disk
-WORKER_PREFETCH = 10
-CLASS_WEIGHTS = True  # this TCGA dataset has more cancer than healthy
+BATCH_SIZE = 1
+NUM_WORKERS = 8 if FEATURES_SCALE == 224 else 1
+WORKER_PREFETCH = 5
+CLASS_WEIGHTS = True
 IN_FEATURES = 1280
 OUT_FEATURES = 1  # Binary tasks
 PRECISION = "bf16-mixed"
-CHECKPOINT_ACTIVATIONS = True  # instead of cropping
+CHECKPOINT_ACTIVATIONS = True
 
-TRAINING_ITERATIONS = 10_000
+DEPTH = 3
+HIDDEN_SIZE = 256
+NUM_HEADS = 4
+ROPE_DYNAMIC_HIGH = FEATURES_SCALE * DOWNSCALE_BLOCK
+
+TRAINING_ITERATIONS = 1_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
 LEARNING_RATE = 2e-4
 WEIGHT_DECAY = 1e-4
 GRAD_CLIP = 1.0
-ACCUMULATE_GRAD_STEPS = 10
+ACCUMULATE_GRAD_STEPS = 5
+PATIENCE = 10  # Early stopping
+# Training will stop after 9h30m, after which testing will start.
+# Set job duration to ~11h to ensure testing is not interrupted
+MAX_DURATION = datetime.timedelta(hours=9, minutes=30)
 
 
 def get_config() -> ExperimentConfig:
@@ -50,16 +66,20 @@ def get_config() -> ExperimentConfig:
 
     # Dataset: Connects to your H5 extraction
     config.dataset = LazyConfig(H5FeatureBagDataModule)(
-        train_csv=f"{CSV_BASE}/train.csv",
-        val_csv=f"{CSV_BASE}/val.csv",
+        train_csv=f"{CSV_TRAIN_FOLD}/train.csv",
+        val_csv=f"{CSV_TRAIN_FOLD}/val.csv",
+        test_csv=f"{CSV_TRAIN_FOLD}/test.csv",
         features_dir=FEATURES_DIR,
-        label_col_name="label",
+        label_col_name=TARGET_NAME,
+        labels=TARGET_OPTIONS,
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
         class_weights=CLASS_WEIGHTS,
         worker_prefetch=WORKER_PREFETCH,
-        features_name="cls_224x224",  # low resolution!
-        coords_name="coords_224x224",
+        features_name=f"{FEATURES_NAME}_{FEATURES_SCALE}x{FEATURES_SCALE}",
+        coords_name=f"coords_{FEATURES_SCALE}x{FEATURES_SCALE}",
+        downscale_block=DOWNSCALE_BLOCK,
+        pin_memory=PIN_MEMORY,
     )
 
     # Network: The very sketchy ViT-5/Small network
@@ -67,14 +87,15 @@ def get_config() -> ExperimentConfig:
         in_features=IN_FEATURES,
         out_features=OUT_FEATURES,
         checkpoint_activations=CHECKPOINT_ACTIVATIONS,
-        downproj=768,  # this is bad! but I need it for now to keep VRAM low because I have other processes running too.
+        downproj=HIDDEN_SIZE,
+        rope_dynamic_high=ROPE_DYNAMIC_HIGH,
+        num_heads=NUM_HEADS,
+        depth=DEPTH,
     )
 
     # Lightning wrapper mappings
     config.lightning_wrapper_class = LazyConfig(WSIAttnWrapper)(
         use_bce_loss=(OUT_FEATURES == 1),
-        training_crop_tokens=None,  # Don't crop here!
-        eval_crop_tokens=None,
         compile_mode="max-autotune-no-cudagraphs",
     )
 
@@ -99,13 +120,13 @@ def get_config() -> ExperimentConfig:
         warmup_iterations_percentage=WARMUP_ITERATIONS_PERCENTAGE,
         total_iterations=TRAINING_ITERATIONS,
         mode="max",
+        patience=PATIENCE,
+        max_duration=MAX_DURATION,
     )
 
     # W&B Logging
     config.wandb = WandbConfig(
-        project="wsi-classification",
-        job_group="baseline_vit5",
-        entity="dl2-2026"
+        project="wsi-classification", job_group="baseline_vit5", entity="dl2-2026"
     )
 
     return config

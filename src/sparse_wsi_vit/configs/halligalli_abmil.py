@@ -2,7 +2,10 @@
 
 ShapePatchCNN (256-dim embedding) is trained from scratch on the HalliGalli
 shape vocabulary and used as a frozen patch encoder.
-Features are pre-extracted by extract_halligalli.py.
+Features are pre-extracted by extract_halligalli.py with:
+  --randomize_key_positions  (no fixed corners)
+  --shape_radius 20          (creates recognition gradient across patch scales)
+  --patch_size 224 or 112
 
 Usage:
     uv run experiments/run.py --config src/sparse_wsi_vit/configs/halligalli_abmil.py
@@ -86,7 +89,7 @@ def get_config() -> ExperimentConfig:
 
     config.wandb = WandbConfig(
         project="wsi-classification",
-        job_group="halligalli_abmil_cnn",
+        job_group="halligalli_abmil_randpos",
     )
 
     return config

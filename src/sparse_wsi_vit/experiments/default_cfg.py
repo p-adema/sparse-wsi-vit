@@ -2,6 +2,7 @@
 
 """Default configuration for experiments with wsi_classification."""
 
+import datetime
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Union
 
@@ -44,7 +45,9 @@ class SchedulerConfig:
     stable_iterations_percentage: float = 0.0
     total_iterations: int = PLACEHOLDER
     mode: str = "max"
-    monitor: Optional[str] = None  # in case we'd like to track e.g. val/iou
+    monitor: str | None = None  # in case we'd like to track e.g. val/iou
+    patience: int = 10  # Early stopping epochs without improvement
+    max_duration: str | datetime.timedelta | None = None  # Timer interrupting training
 
 
 @dataclass
@@ -55,6 +58,7 @@ class WandbConfig:
     entity: str = ""
 
     job_group: str = ""
+    name: str = ""
 
 
 @dataclass

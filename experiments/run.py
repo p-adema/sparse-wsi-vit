@@ -13,11 +13,11 @@ from pathlib import Path
 
 import pytorch_lightning as pl
 import torch
+import wandb
+from lightning_fabric.utilities.exceptions import MisconfigurationException
 from pytorch_lightning.loggers import WandbLogger
 from rich import print as rprint
 from rich.tree import Tree
-
-import wandb
 from sparse_wsi_vit.experiments.trainer import construct_trainer
 from sparse_wsi_vit.experiments.utils.cli import (
     add_to_tree,
@@ -28,7 +28,6 @@ from sparse_wsi_vit.experiments.utils.cli import (
     verify_no_interpolator_overwrites,
 )
 from sparse_wsi_vit.experiments.utils.lazy_config import instantiate
-
 
 torch._dynamo.config.cache_size_limit = 32
 
@@ -155,7 +154,7 @@ def main() -> None:
                 f"[autoresume] No run ID file found in experiment directory '{experiment_dir}'."
             )
     else:
-        attach_run_id = wandb.util.generate_id()
+        attach_run_id = config.wandb.name + wandb.util.generate_id()
         run_id_file.write_text(attach_run_id)
 
     if config.autoresume.enabled:
@@ -232,6 +231,7 @@ def main() -> None:
         if best_ckpt_path:
             best_ckpt_path = str(best_ckpt_path)
         if best_ckpt_path and os.path.isfile(best_ckpt_path):
+            print(f"[checkpoint] Loaded best model from {best_ckpt_path}")
             model.load_state_dict(torch.load(best_ckpt_path)["state_dict"])
         else:
             print(
@@ -243,10 +243,13 @@ def main() -> None:
         model,
         datamodule=datamodule,
     )
-    trainer.test(
-        model,
-        datamodule=datamodule,
-    )
+    try:
+        trainer.test(
+            model,
+            datamodule=datamodule,
+        )
+    except MisconfigurationException:
+        print("No valid test configuration, skipping")
 
 
 if __name__ == "__main__":

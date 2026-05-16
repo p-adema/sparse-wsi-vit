@@ -60,6 +60,7 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         self,
         train_csv: str,
         val_csv: str,
+        test_csv: str | None = None,
         features_dir: str = "",
         label_col_name: str = "label",
         batch_size: int = 1,
@@ -69,13 +70,18 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         features_name: str = "features",
         coords_name: str = "coords",
         flatten_block: bool = True,
+        downscale_block: int = 1,
         output_channels: int = 1,
+        labels: tuple[str, ...] | None = None,
+        pin_memory: bool = True,
     ):
         super().__init__()
         self.train_csv = train_csv
         self.val_csv = val_csv
+        self.test_csv = test_csv
         self.features_dir = features_dir
         self.label_col_name = label_col_name
+        self.labels = labels
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.input_channels = 1280
@@ -84,7 +90,12 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         self.features_name = features_name
         self.coords_name = coords_name
         self.flatten_block = flatten_block
+        self.downscale_block = downscale_block
         self.output_channels = output_channels
+        self.pin_memory = pin_memory
+        self.train_dataset: H5FeatureBagDataset | None = None
+        self.val_dataset: H5FeatureBagDataset | None = None
+        self.test_dataset: H5FeatureBagDataset | None = None
 
     def setup(self, stage: str | None = None) -> None:
         """Instantiate train and validation datasets.
@@ -93,75 +104,65 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
             stage: Either ``"fit"`` or ``None``; only ``"fit"`` is supported.
         """
         if stage in ("fit", None):
-            train_csv = list(self.train_csv) if not isinstance(self.train_csv, str) else self.train_csv
-            val_csv = list(self.val_csv) if not isinstance(self.val_csv, str) else self.val_csv
-
-            if isinstance(train_csv, list):
-                from torch.utils.data import ConcatDataset
-                self.train_dataset = ConcatDataset([
-                    H5FeatureBagDataset(
-                        csv_path=csv,
-                        features_dir=self.features_dir,
-                        label_col_name=self.label_col_name,
-                        class_weights=self.class_weights,
-                        features_name=self.features_name,
-                        coords_name=self.coords_name,
-                        flatten_block=self.flatten_block,
-                    ) for csv in train_csv
-                ])
-            else:
-                self.train_dataset = H5FeatureBagDataset(
-                    csv_path=train_csv,
-                    features_dir=self.features_dir,
-                    label_col_name=self.label_col_name,
-                    class_weights=self.class_weights,
-                    features_name=self.features_name,
-                    coords_name=self.coords_name,
-                    flatten_block=self.flatten_block,
+            dataset_args = {
+                "features_dir": self.features_dir,
+                "label_col_name": self.label_col_name,
+                "class_weights": self.class_weights,
+                "features_name": self.features_name,
+                "coords_name": self.coords_name,
+                "flatten_block": self.flatten_block,
+                "downscale_block": self.downscale_block,
+                "labels": self.labels,
+            }
+            self.train_dataset = H5FeatureBagDataset(
+                csv_path=self.train_csv, **dataset_args
+            )
+            self.val_dataset = H5FeatureBagDataset(
+                csv_path=self.val_csv, **dataset_args
+            )
+            if self.test_csv is not None:
+                self.test_dataset = H5FeatureBagDataset(
+                    csv_path=self.test_csv, **dataset_args
                 )
-
-            if isinstance(val_csv, list):
-                from torch.utils.data import ConcatDataset
-                self.val_dataset = ConcatDataset([
-                    H5FeatureBagDataset(
-                        csv_path=csv,
-                        features_dir=self.features_dir,
-                        label_col_name=self.label_col_name,
-                        features_name=self.features_name,
-                        coords_name=self.coords_name,
-                        flatten_block=self.flatten_block,
-                    ) for csv in val_csv
-                ])
             else:
-                self.val_dataset = H5FeatureBagDataset(
-                    csv_path=val_csv,
-                    features_dir=self.features_dir,
-                    label_col_name=self.label_col_name,
-                    features_name=self.features_name,
-                    coords_name=self.coords_name,
-                    flatten_block=self.flatten_block,
-                )
+                self.test_dataset = None
 
     def train_dataloader(self) -> DataLoader:
         """Return the training DataLoader."""
+        assert self.train_dataset is not None, "Must have completed setup first!"
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
             collate_fn=mil_collate_fn,
-            pin_memory=True,
+            pin_memory=self.pin_memory,
             prefetch_factor=self.worker_prefetch,
         )
 
     def val_dataloader(self) -> DataLoader:
         """Return the validation DataLoader."""
+        assert self.val_dataset is not None, "Must have completed setup first!"
         return DataLoader(
             self.val_dataset,
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
             collate_fn=mil_collate_fn,
-            pin_memory=True,
+            pin_memory=self.pin_memory,
+            prefetch_factor=self.worker_prefetch,
+        )
+
+    def test_dataloader(self) -> DataLoader:
+        if self.test_dataset is None:
+            print("WARNING: no test dataloader, testing on validation test!")
+            return self.val_dataloader()
+        return DataLoader(
+            self.test_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            collate_fn=mil_collate_fn,
+            pin_memory=self.pin_memory,
             prefetch_factor=self.worker_prefetch,
         )
