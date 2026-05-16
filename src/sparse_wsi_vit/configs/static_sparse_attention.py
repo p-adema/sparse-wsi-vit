@@ -51,9 +51,9 @@ IN_FEATURES=1280
 OUT_FEATURES=1
 PRECISION="bf16-mixed"
 # PRECISION="32-true"
-EMBED_DIM=256
-NUM_HEADS=4            # embed_dim // num_heads=64
-DEPTH=6
+EMBED_DIM=128
+NUM_HEADS=2            # embed_dim // num_heads=64
+DEPTH=4
 NUM_CLS=2
 
 MLP_RATIO=4.0
@@ -76,7 +76,7 @@ CLASS_WEIGHTS=True
 WORKER_PREFETCH=2
 
 # ─── StaticSparseAttention-specific ──────────────────────────────────────────
-WINDOW_SIZE=4            # neighbouring chunks on each side
+WINDOW_SIZE=2            # neighbouring chunks on each side
 CHUNK_SIZE=256           # patches per logical chunk (must be multiple of FLEX_BLOCK_SIZE)
 FLEX_BLOCK_SIZE=128      # FlexAttention kernel tile size
 ROPE_THETA=10_000.0
@@ -100,8 +100,8 @@ def get_config() -> ExperimentConfig:
         num_workers=NUM_WORKERS,
         class_weights=CLASS_WEIGHTS,
         worker_prefetch=WORKER_PREFETCH,
-        features_name="patches_112x112",
-        coords_name="coords_112x112",
+        features_name="patches_56x56",
+        coords_name="coords_56x56",
     )
 
     config.net=LazyConfig(SparseViT5SlideEncoder)(
