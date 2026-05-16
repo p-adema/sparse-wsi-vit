@@ -3,7 +3,7 @@
 Usage:
     python -m sparse-wsi-vit.experiments.run --config configs/static_sparse_attention_config.py
 """
-
+import os
 import torch
 import datetime
 
