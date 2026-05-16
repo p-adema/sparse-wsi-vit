@@ -221,12 +221,6 @@ class WSIAttnWrapper(LightningWrapperBase):
             sync_dist=True,
             batch_size=batch_size,
         )
-        self.log("val/num_patches", float(num_patches), on_epoch=True, batch_size=batch_size)
-        self.log("val/step_ms", step_ms, on_epoch=True, batch_size=batch_size)
-        logits = output_dict["logits"].squeeze(1)
-        self.log("val/logits_mean", logits.mean(), on_epoch=True, batch_size=batch_size)
-        if logits.numel() > 1:
-            self.log("val/logits_std", logits.std(), on_epoch=True, batch_size=batch_size)
         self.log(
             f"{kind}/num_patches",
             float(num_patches),
