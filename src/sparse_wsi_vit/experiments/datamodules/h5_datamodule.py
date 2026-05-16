@@ -73,6 +73,7 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         downscale_block: int = 1,
         output_channels: int = 1,
         labels: tuple[str, ...] | None = None,
+        pin_memory: bool = True,
     ):
         super().__init__()
         self.train_csv = train_csv
@@ -91,6 +92,7 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
         self.flatten_block = flatten_block
         self.downscale_block = downscale_block
         self.output_channels = output_channels
+        self.pin_memory = pin_memory
         self.train_dataset: H5FeatureBagDataset | None = None
         self.val_dataset: H5FeatureBagDataset | None = None
         self.test_dataset: H5FeatureBagDataset | None = None
@@ -134,7 +136,7 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
             shuffle=True,
             num_workers=self.num_workers,
             collate_fn=mil_collate_fn,
-            pin_memory=True,
+            pin_memory=self.pin_memory,
             prefetch_factor=self.worker_prefetch,
         )
 
@@ -147,7 +149,7 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             collate_fn=mil_collate_fn,
-            pin_memory=True,
+            pin_memory=self.pin_memory,
             prefetch_factor=self.worker_prefetch,
         )
 
@@ -161,6 +163,6 @@ class H5FeatureBagDataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             collate_fn=mil_collate_fn,
-            pin_memory=True,
+            pin_memory=self.pin_memory,
             prefetch_factor=self.worker_prefetch,
         )

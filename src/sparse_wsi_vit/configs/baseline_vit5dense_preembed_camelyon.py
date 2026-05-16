@@ -19,6 +19,8 @@ from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import (
 from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
 from sparse_wsi_vit.models.vit5_dense import VitDensePreEmbedded
 
+PIN_MEMORY = True
+
 # ─── Data Details ──────────────────────────────────────────────
 CSV_TRAIN_FOLD = "../splits/camelyon/full"
 TARGET_NAME = "is_tumor"
@@ -71,6 +73,7 @@ def get_config() -> ExperimentConfig:
         features_name=f"{FEATURES_NAME}_{FEATURES_SCALE}x{FEATURES_SCALE}",
         coords_name=f"coords_{FEATURES_SCALE}x{FEATURES_SCALE}",
         downscale_block=DOWNSCALE_BLOCK,
+        pin_memory=PIN_MEMORY,
     )
 
     # Network: The very sketchy ViT-5/Small network
