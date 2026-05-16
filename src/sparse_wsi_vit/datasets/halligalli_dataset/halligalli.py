@@ -1,29 +1,32 @@
 """HalliGalli: a synthetic benchmark for long-range spatial reasoning.
 
-Four "key" shapes are placed near the four corners of the image.  The
-**global binary label** is 1 when any two corners share the same shape
-type (at least one matching pair), and 0 when all four corners show
-distinct shapes.  No single patch carries enough information to solve
-the task — the model must compare distant patches against each other.
+Four "key" shapes are placed at **random positions** inside the image.  The
+**global binary label** is 1 when **exactly two** of the four shapes share
+the same type (one matching pair, the other two are distinct), and 0 when
+all four shapes are distinct.  No single patch carries enough information
+to solve the task — the model must find and compare distant patches.
 
-Designed to stress-test hierarchical encoders (HiPT, ABMIL, TransMIL):
-shapes are randomly rotated, scale-jittered, and embedded in dense
-visual clutter, so that compressing a region into a fixed-dim vector is
-lossy enough to destroy the shape-identity signal.
+Designed to stress-test global-attention MIL models (ViT-5 Dense) vs
+local-pooling models (ABMIL, TransMIL, HIPT):
+  - shapes are randomly rotated, scale-jittered, and embedded in dense
+    line clutter so that patch-encoder quality determines recognition
+  - key shapes are placed in patch interiors (never straddling boundaries)
+    so that each key shape lands cleanly in exactly one patch
+  - finer patch sizes (e.g. 112px) give higher per-patch recognition and
+    a larger bag of patches → tests global attention at scale
 
 Key parameters
 --------------
-image_size        Height = Width.  Scale to 1024+ for WSI regimes.
-clutter_density   Average number of clutter elements per 256×256 region.
-shape_radius      Radius of key shapes.  Default auto-scales to
-                  image_size * 0.008.
-noise_sigma       Per-pixel Gaussian noise.
-scale_jitter      Per-shape radius randomisation (±fraction of shape_radius).
-
-Reference
----------
-Moens, Beets-Tan & Pooch, "SONIC: Spectral Oriented Neural Invariant
-Convolutions", ICLR 2026, Section 4 (page 6) and Table 1.
+image_size              Height = Width.
+clutter_density         Average clutter elements per 256×256 region.
+shape_radius            Radius of key shapes (default 20 for benchmark).
+patch_size              Patch grid size; required when
+                        randomize_key_positions=True to enforce patch-
+                        interior alignment.
+randomize_key_positions If True, place shapes at random patch-interior-
+                        aligned positions instead of fixed corners.
+noise_sigma             Per-pixel Gaussian noise.
+scale_jitter            Per-shape radius jitter (±fraction of shape_radius).
 """
 
 import random
@@ -237,17 +240,65 @@ class HalliGalliGenerator:
     """
 
     @staticmethod
-    def _key_positions(H, W):
-        """Return four corner positions with an 8% margin from each edge."""
-        cy, cx = H / 2, W / 2
-        dy = H / 2 - H * 0.08
-        dx = W / 2 - W * 0.08
+    def _key_positions(H, W, shape_radius=0):
+        """Return four fixed corner positions inset from each edge.
+
+        Inset is at least 8% of image size, and at least shape_radius + 20px,
+        so shapes never clip at the image boundary regardless of radius.
+        """
+        inset_y = max(int(H * 0.08), shape_radius + 20)
+        inset_x = max(int(W * 0.08), shape_radius + 20)
         return [
-            (int(cy - dy), int(cx - dx)),
-            (int(cy - dy), int(cx + dx)),
-            (int(cy + dy), int(cx - dx)),
-            (int(cy + dy), int(cx + dx)),
+            (inset_y,      inset_x),
+            (inset_y,      W - inset_x),
+            (H - inset_y,  inset_x),
+            (H - inset_y,  W - inset_x),
         ]
+
+    @staticmethod
+    def _random_key_positions(H, W, n, shape_radius, patch_size):
+        """Sample n non-overlapping positions aligned to patch interiors.
+
+        Each returned centre (y, x) satisfies:
+          - at least shape_radius pixels from every image edge
+          - (y % patch_size) and (x % patch_size) both in
+            [shape_radius, patch_size - shape_radius]
+            → shape fits fully within a single patch
+          - Euclidean distance ≥ 4 * shape_radius between any two centres
+        """
+        img_margin = 3 * shape_radius
+        min_sep_sq = (4 * shape_radius) ** 2
+        inner = shape_radius  # min distance from patch boundary
+
+        positions = []
+        max_attempts = n * 5000
+        attempts = 0
+
+        while len(positions) < n:
+            if attempts >= max_attempts:
+                raise RuntimeError(
+                    f"Could not place {n} patch-interior-aligned key shapes after "
+                    f"{max_attempts} attempts (H={H}, W={W}, shape_radius={shape_radius}, "
+                    f"patch_size={patch_size}).  Try a larger image or smaller shape_radius."
+                )
+            attempts += 1
+
+            y = random.randint(img_margin, H - img_margin - 1)
+            x = random.randint(img_margin, W - img_margin - 1)
+
+            y_in_patch = y % patch_size
+            x_in_patch = x % patch_size
+            if not (inner <= y_in_patch <= patch_size - inner):
+                continue
+            if not (inner <= x_in_patch <= patch_size - inner):
+                continue
+
+            if any((y - py) ** 2 + (x - px) ** 2 < min_sep_sq for py, px in positions):
+                continue
+
+            positions.append((y, x))
+
+        return positions
 
     @staticmethod
     def generate_single(
@@ -257,67 +308,78 @@ class HalliGalliGenerator:
         clutter_density=15,
         scale_jitter=0.3,
         target_label=None,
+        randomize_key_positions=False,
+        patch_size=None,
     ):
         """Create one HalliGalli sample.
 
-        Returns (image, label, corner_shapes, positions) where image is
-        (H, W, 3) float32, label is 0/1, and positions are the (y, x)
-        centres of the four key shapes.
-        shape_radius defaults to max(3, image_size * 0.008).
+        Returns (image, label, key_shapes, positions) where image is
+        (H, W, 3) float32, label is 0/1, key_shapes is a list of 4 shape
+        names, and positions are the (y, x) centres of the four key shapes.
+
+        Label rule (strict): label=1 iff exactly one shape appears exactly
+        twice among the four key shapes (one pair, two distinct singletons).
+
+        shape_radius defaults to max(3, image_size * 0.008) when None;
+        recommended value for benchmark experiments is 20.
+
+        When randomize_key_positions=True, patch_size must be provided so
+        that shapes are placed in patch interiors (no boundary clipping).
         """
         H = W = image_size
         image = np.zeros((H, W, 3), dtype=np.float32)
 
-        # base radius: tiny relative to image
         r_base = (
             shape_radius
             if shape_radius is not None
             else max(3, int(image_size * 0.008))
         )
 
-        # compute key positions up-front so clutter can avoid them
-        positions = HalliGalliGenerator._key_positions(H, W)
+        # ── key positions ─────────────────────────────────────────
+        if randomize_key_positions:
+            if patch_size is None:
+                raise ValueError("patch_size is required when randomize_key_positions=True")
+            positions = HalliGalliGenerator._random_key_positions(H, W, 4, r_base, patch_size)
+        else:
+            positions = HalliGalliGenerator._key_positions(H, W, r_base)
 
         # ── background clutter (drawn first, behind everything) ───
         if clutter_density > 0:
-            _draw_clutter(
-                image,
-                clutter_density,
-                exclude_positions=positions,
-                exclude_radius=3 * r_base,
-            )
+            _draw_clutter(image, clutter_density)
 
         # ── four key shapes ───────────────────────────────────────
+        # Resolve target_label before branching to avoid unconstrained sampling.
+        if target_label is None:
+            target_label = random.randint(0, 1)
+
         if target_label == 1:
             # exactly one pair + two distinct singletons
             pair = random.choice(ALL_SHAPES)
             singletons = random.sample([s for s in ALL_SHAPES if s != pair], 2)
-            corner_shapes = [pair, pair] + singletons
-            random.shuffle(corner_shapes)
-        elif target_label == 0:
-            # all four corners are distinct shapes (no pair exists)
-            corner_shapes = random.sample(ALL_SHAPES, 4)
+            key_shapes = [pair, pair] + singletons
+            random.shuffle(key_shapes)
         else:
-            corner_shapes = random.choices(ALL_SHAPES, k=4)
+            # all four shapes are distinct (no pair)
+            key_shapes = random.sample(ALL_SHAPES, 4)
 
-        for (cy, cx), shape_name in zip(positions, corner_shapes):
-            # per-shape variation
+        for (cy, cx), shape_name in zip(positions, key_shapes):
             r = max(
                 2, int(r_base * np.random.uniform(1 - scale_jitter, 1 + scale_jitter))
             )
             angle = np.random.uniform(0, 2 * np.pi)
             _stamp_shape(image, shape_name, cy, cx, r, angle_rad=angle)
 
-        # ── label ─────────────────────────────────────────────────
-        counts = Counter(corner_shapes)
-        label = 1 if any(n >= 2 for n in counts.values()) else 0
+        # ── label (strict: exactly one pair, no triples/double-pairs) ──
+        counts = Counter(key_shapes)
+        vals = list(counts.values())
+        label = 1 if (max(vals) == 2 and sum(1 for v in vals if v >= 2) == 1) else 0
 
         # ── per-pixel noise ───────────────────────────────────────
         if noise_sigma > 0:
             image += noise_sigma * np.random.randn(H, W, 3).astype(np.float32)
         image = np.clip(image, 0.0, 1.0)
 
-        return image, label, corner_shapes, positions
+        return image, label, key_shapes, positions
 
 
 # ── visualisation ─────────────────────────────────────────────────────
@@ -342,16 +404,16 @@ def _show_samples(n=8, highlight=True, image_only=False, **kwargs):
 
     if image_only:
         for j in range(n):
-            img, lbl, shapes, positions = HalliGalliGenerator.generate_single(**kwargs)
+            img, lbl, key_shapes, positions = HalliGalliGenerator.generate_single(**kwargs)
             fig, ax = plt.subplots(1, 1, figsize=(4, 4))
             ax.imshow(img)
             ax.axis("off")
 
             if highlight:
-                counts = Counter(shapes)
+                counts = Counter(key_shapes)
                 repeated = {s for s, k in counts.items() if k >= 2}
                 pair_idx = (
-                    {i for i, s in enumerate(shapes) if s in repeated}
+                    {i for i, s in enumerate(key_shapes) if s in repeated}
                     if lbl == 1
                     else set()
                 )
@@ -376,15 +438,15 @@ def _show_samples(n=8, highlight=True, image_only=False, **kwargs):
         axes = axes[:, None]
 
     for j in range(n):
-        img, lbl, shapes, positions = HalliGalliGenerator.generate_single(**kwargs)
+        img, lbl, key_shapes, positions = HalliGalliGenerator.generate_single(**kwargs)
         axes[0, j].imshow(img)
         axes[0, j].set_title(f"label={lbl}", fontsize=9)
         axes[0, j].axis("off")
 
-        counts = Counter(shapes)
+        counts = Counter(key_shapes)
         repeated = {s for s, k in counts.items() if k >= 2}
         pair_idx = (
-            {i for i, s in enumerate(shapes) if s in repeated}
+            {i for i, s in enumerate(key_shapes) if s in repeated}
             if lbl == 1
             else set()
         )
@@ -402,7 +464,7 @@ def _show_samples(n=8, highlight=True, image_only=False, **kwargs):
 
         txt_lines = [
             f"{i}: {s}{' *' if i in pair_idx else ''}"
-            for i, s in enumerate(shapes)
+            for i, s in enumerate(key_shapes)
         ]
         axes[1, j].text(
             0.05, 0.5, "\n".join(txt_lines),
@@ -421,15 +483,26 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser("HalliGalli benchmark generator")
-    parser.add_argument("--image_size", type=int, default=512)
-    parser.add_argument("--noise_sigma", type=float, default=0.05)
-    parser.add_argument("--clutter_density", type=float, default=15)
-    parser.add_argument("--shape_radius", type=int, default=None)
+    parser.add_argument("--image_size", type=int, default=1792)
+    parser.add_argument("--noise_sigma", type=float, default=0.0)
+    parser.add_argument("--clutter_density", type=float, default=30)
+    parser.add_argument("--shape_radius", type=int, default=20)
     parser.add_argument("--scale_jitter", type=float, default=0.3)
+    parser.add_argument(
+        "--randomize_key_positions",
+        action="store_true",
+        help="Place key shapes at random patch-interior-aligned positions instead of fixed corners",
+    )
+    parser.add_argument(
+        "--patch_size",
+        type=int,
+        default=None,
+        help="Patch grid size; required when --randomize_key_positions is set",
+    )
     parser.add_argument(
         "--visualize",
         action="store_true",
-        help="Plot and save sample images to halligalli_samples.png",
+        help="Plot and save sample images to halligalli_samples.pdf",
     )
     parser.add_argument(
         "--n_samples",
@@ -453,7 +526,11 @@ if __name__ == "__main__":
         k: v
         for k, v in vars(args).items()
         if k not in ("visualize", "n_samples", "no_highlight", "image_only")
+        and v is not None
     }
+    # keep boolean flags even when False
+    if "randomize_key_positions" not in kw:
+        kw["randomize_key_positions"] = args.randomize_key_positions
 
     if args.visualize:
         _show_samples(

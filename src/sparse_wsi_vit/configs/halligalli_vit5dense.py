@@ -88,7 +88,7 @@ def get_config() -> ExperimentConfig:
 
     config.wandb = WandbConfig(
         project="wsi-classification",
-        job_group="halligalli_vit5dense_cnn",
+        job_group="halligalli_vit5dense_randpos",
     )
 
     return config
