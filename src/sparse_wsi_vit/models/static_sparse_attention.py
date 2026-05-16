@@ -12,6 +12,8 @@ import torch.nn as nn
 from torch import Tensor
 from torch.nn.attention.flex_attention import flex_attention, BlockMask
 
+from sparse_wsi_vit.models.vit_5.rope import VisionRotaryEmbedding
+
 compiled_flex_attention = torch.compile(
     partial(flex_attention, kernel_options={"BACKEND": "TRITON"}),
     dynamic=True,
@@ -90,12 +92,6 @@ def build_block_mask(
     )
 
 
-def _rotate_half(x: Tensor) -> Tensor:
-    """Rotate adjacent pairs: [..., x1, x2, ...] → [..., -x2, x1, ...]."""
-    x1 = x[..., 0::2]
-    x2 = x[..., 1::2]
-    return torch.stack([-x2, x1], dim=-1).flatten(-2)
-
 
 def hilbert_sort(coords: Tensor) -> Tensor:
     """Sort patches by 2-D Hilbert curve so spatially nearby patches are contiguous.
@@ -136,64 +132,6 @@ def hilbert_sort(coords: Tensor) -> Tensor:
     return d.argsort(dim=1)
 
 
-
-class Rope2D(nn.Module):
-    """2-D Rotary Position Embedding for patch tokens.
-
-    Applies 1-D RoPE independently along the x and y coordinate axes.
-    ``head_dim`` is split evenly: the first half encodes x, the second
-    half encodes y.
-
-    Args:
-        head_dim: Per-head feature dimension. Must be divisible by 4.
-        theta: RoPE base frequency.
-        coord_high: Coordinate normalisation divisor.  Raw pixel coords
-            are divided by this value before computing frequencies.
-            Default: 100_000 — matches ViT-5 ``rope_dynamic_high`` and
-            is suitable for WSI pixel-level coordinates.
-    """
-
-    def __init__(
-        self,
-        head_dim: int,
-        theta: float = 10_000.0,
-        coord_high: float = 100_000.0,
-    ) -> None:
-        super().__init__()
-        if head_dim % 4 != 0:
-            raise ValueError(
-                f"head_dim must be divisible by 4 for 2D RoPE, got {head_dim}"
-            )
-        half = head_dim // 2
-        inv_freq = 1.0 / (theta ** (torch.arange(0, half, 2).float() / half))
-        self.register_buffer("inv_freq", inv_freq)  # (half // 2,)
-        self.coord_high = coord_high
-
-    def forward(self, x: Tensor, coords: Tensor) -> Tensor:
-        """Rotate Q or K using 2-D spatial coordinates.
-
-        Args:
-            x: ``(batch_size, num_heads, patch_len, head_dim)`` — patch queries or keys.
-            coords: ``(batch_size, patch_len, 2)`` — (x, y) pixel coordinates for each patch.
-
-        Returns:
-            Rotated tensor, same shape as ``x``.
-        """
-        xy = coords.float() / self.coord_high  # (batch_size, patch_len, 2)
-
-        # Per-token frequency vectors for each axis: (batch_size, patch_len, half//2)
-        freq_x = torch.einsum("bl, f -> blf", xy[..., 0], self.inv_freq)
-        freq_y = torch.einsum("bl, f -> blf", xy[..., 1], self.inv_freq)
-
-        # Repeat each freq to align with rotate_half on adjacent pairs
-        freq_x = freq_x.repeat_interleave(2, dim=-1)  # (batch_size, patch_len, half)
-        freq_y = freq_y.repeat_interleave(2, dim=-1)  # (batch_size, patch_len, half)
-
-        freqs = torch.cat([freq_x, freq_y], dim=-1)   # (batch_size, patch_len, head_dim)
-        cos = freqs.cos().unsqueeze(1)  # (batch_size, 1, patch_len, head_dim)
-        sin = freqs.sin().unsqueeze(1)
-
-        return x * cos + _rotate_half(x) * sin
 
 
 class StaticSparseAttention(nn.Module):
@@ -248,7 +186,12 @@ class StaticSparseAttention(nn.Module):
         self.flex_block_size = flex_block_size
         self.head_dim = embed_dim // num_heads
 
-        self.rope = Rope2D(self.head_dim, theta=rope_theta, coord_high=rope_coord_high)
+        self.rope = VisionRotaryEmbedding(
+            self.head_dim // 2,
+            dynamic=True,
+            coord_high=rope_coord_high,
+            theta=rope_theta,
+        )
         self.qkv = nn.Linear(embed_dim, 3 * embed_dim, bias=True)
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=True)
 
@@ -270,8 +213,10 @@ class StaticSparseAttention(nn.Module):
         q, k, v = qkv.unbind(0)
 
         if coords is not None:
-            q = torch.cat([q[:, :, :num_cls], self.rope(q[:, :, num_cls:], coords)], dim=2)
-            k = torch.cat([k[:, :, :num_cls], self.rope(k[:, :, num_cls:], coords)], dim=2)
+            q_patch = q[:, :, num_cls:].transpose(1, 2)
+            k_patch = k[:, :, num_cls:].transpose(1, 2)
+            q = torch.cat([q[:, :, :num_cls], self.rope(q_patch, coords).transpose(1, 2)], dim=2)
+            k = torch.cat([k[:, :, :num_cls], self.rope(k_patch, coords).transpose(1, 2)], dim=2)
 
         chunk_size = self.chunk_size
         window_size = self.window_size
