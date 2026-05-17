@@ -39,6 +39,7 @@ class MILWrapper(LightningWrapperBase):
 
         self.train_acc = torchmetrics.Accuracy(**acc_kwargs)
         self.val_acc = torchmetrics.Accuracy(**acc_kwargs)
+        self.val_auc = torchmetrics.AUROC(**acc_kwargs)
 
         self.use_bce_loss = use_bce_loss
         if self.multiclass and not self.use_bce_loss:
@@ -121,7 +122,13 @@ class MILWrapper(LightningWrapperBase):
         gc.collect()
         torch.cuda.empty_cache()
 
-        loss, _, _ = self._step(batch, self.val_acc)
+        loss, _, output_dict = self._step(batch, self.val_acc)
+        logits = output_dict["logits"]
+        if self.use_bce_loss:
+            probs = torch.sigmoid(logits)
+        else:
+            probs = torch.softmax(logits, dim=-1)
+        self.val_auc.update(probs, batch["label"])
         self.log(
             "val/loss",
             loss,
@@ -133,7 +140,10 @@ class MILWrapper(LightningWrapperBase):
         return loss
 
     def on_validation_epoch_end(self) -> None:
-        """Log epoch-level validation accuracy and reset the accumulator."""
+        """Log epoch-level validation accuracy and AUC, then reset accumulators."""
         acc = self.val_acc.compute()
         self.log("val/acc", acc, sync_dist=True)
         self.val_acc.reset()
+        auc = self.val_auc.compute()
+        self.log("val/auc", auc, sync_dist=True)
+        self.val_auc.reset()
