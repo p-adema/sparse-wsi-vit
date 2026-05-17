@@ -152,37 +152,55 @@ class MondriaanGenerator:
         obj_types : list[int], indices into the vocabulary (length 4)
         positions : list[tuple[int, int]], top-left (y, x) corners (length 4)
         """
-        if random_colors:
-            base = np.random.uniform(0, 1, size=(4, 3)).astype(np.float32)
-            if object_type == "patterned":
-                vocab = [[base[i] for i in perm] for perm in _PATTERNED_PERMS]
-            else:
-                vocab = [[base[i]] * 4 for i in range(4)]
-        else:
-            vocab = PATTERNED_VOCAB if object_type == "patterned" else SOLID_VOCAB
-        n_types = len(vocab)
-
         image = np.zeros((image_size, image_size, 3), dtype=np.float32)
         positions = MondriaanGenerator._random_positions(image_size, 4, min_sep)
 
         if target_label is None:
             target_label = random.randint(0, 1)
 
-        if target_label == 1:
-            pair = random.randrange(n_types)
-            others = random.sample([t for t in range(n_types) if t != pair], 2)
-            obj_types = [pair, pair] + others
-            random.shuffle(obj_types)
+        if random_colors and object_type == "patterned":
+            # Each object gets its own independently sampled 4-colour pattern.
+            # Mean preservation is intentionally broken: objects have different
+            # per-image means, so ps4 no longer guarantees all objects collapse
+            # to the same token.  The pair in label=1 is still pixel-identical.
+            def _rand_pat():
+                return np.random.uniform(0, 1, size=(4, 3)).astype(np.float32)
+            if target_label == 1:
+                pair_pat = _rand_pat()
+                entries = [(pair_pat, 0), (pair_pat, 0), (_rand_pat(), 1), (_rand_pat(), 2)]
+            else:
+                entries = [(_rand_pat(), i) for i in range(4)]
+            random.shuffle(entries)
+            pats, obj_types = zip(*entries)
+            obj_types = list(obj_types)
+            for (y, x), (tl, tr, bl, br) in zip(positions, pats):
+                image[y:y+2, x:x+2]     = tl
+                image[y:y+2, x+2:x+4]   = tr
+                image[y+2:y+4, x:x+2]   = bl
+                image[y+2:y+4, x+2:x+4] = br
         else:
-            obj_types = random.sample(range(n_types), 4)
+            if random_colors:
+                # solid + random_colors: shared palette, one solid colour per type
+                base = np.random.uniform(0, 1, size=(4, 3)).astype(np.float32)
+                vocab = [[base[i]] * 4 for i in range(4)]
+            else:
+                vocab = PATTERNED_VOCAB if object_type == "patterned" else SOLID_VOCAB
+            n_types = len(vocab)
 
-        for (y, x), t in zip(positions, obj_types):
-            tl, tr, bl, br = vocab[t]
-            # each colour fills a 2×2 quadrant within the 4×4 object
-            image[y:y+2, x:x+2] = tl    # top-left quadrant
-            image[y:y+2, x+2:x+4] = tr  # top-right quadrant
-            image[y+2:y+4, x:x+2] = bl  # bottom-left quadrant
-            image[y+2:y+4, x+2:x+4] = br  # bottom-right quadrant
+            if target_label == 1:
+                pair = random.randrange(n_types)
+                others = random.sample([t for t in range(n_types) if t != pair], 2)
+                obj_types = [pair, pair] + others
+                random.shuffle(obj_types)
+            else:
+                obj_types = random.sample(range(n_types), 4)
+
+            for (y, x), t in zip(positions, obj_types):
+                tl, tr, bl, br = vocab[t]
+                image[y:y+2, x:x+2]     = tl
+                image[y:y+2, x+2:x+4]   = tr
+                image[y+2:y+4, x:x+2]   = bl
+                image[y+2:y+4, x+2:x+4] = br
 
         # strict label check — same rule as HalliGalli
         counts = Counter(obj_types)
