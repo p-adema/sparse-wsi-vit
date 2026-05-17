@@ -1,6 +1,6 @@
 """TransMIL on raw RGB pixel features from the Mondriaan synthetic benchmark.
 
-Input: 4096 raw pixels (pool_size=1), each a 3-dim RGB vector.
+Input: 1024 raw pixels (32×32 image, pool_size=1), each a 3-dim RGB vector.
 TransMIL's _fc1 projects 3→512 internally.
 
 Expected result: ~50% accuracy (chance) on patterned — Nyström attention pools
@@ -31,7 +31,7 @@ IN_FEATURES  = 3      # raw RGB pixels
 OUT_FEATURES = 2      # binary, CrossEntropy
 
 # ─── Optimisation ────────────────────────────────────────────────────────────
-BATCH_SIZE    = 16
+BATCH_SIZE    = 64    # Nyström O(N×landmarks) not O(N²); GPU was at 2% before
 NUM_WORKERS   = 4
 PRECISION     = "bf16-mixed"
 

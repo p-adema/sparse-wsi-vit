@@ -28,7 +28,7 @@ IN_FEATURES  = 3
 OUT_FEATURES = 2
 
 # ─── Optimisation ────────────────────────────────────────────────────────────
-BATCH_SIZE    = 16
+BATCH_SIZE    = 64    # Nyström O(N×landmarks) not O(N²); GPU was at 2% before
 NUM_WORKERS   = 4
 PRECISION     = "bf16-mixed"
 

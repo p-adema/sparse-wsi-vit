@@ -32,7 +32,7 @@ IN_FEATURES  = 3      # raw RGB pixels
 OUT_FEATURES = 2      # binary, CrossEntropy
 
 # ─── Optimisation ────────────────────────────────────────────────────────────
-BATCH_SIZE    = 4     # 4096 tokens × 4 — fits A100 with flash attention
+BATCH_SIZE    = 64    # 1024 tokens × 64 — attention memory is 16× smaller than 4096-token runs
 NUM_WORKERS   = 4
 PRECISION     = "bf16-mixed"
 

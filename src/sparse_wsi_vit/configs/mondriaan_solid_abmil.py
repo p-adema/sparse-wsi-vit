@@ -30,7 +30,7 @@ IN_FEATURES  = 3
 OUT_FEATURES = 2
 
 # ─── Optimisation ────────────────────────────────────────────────────────────
-BATCH_SIZE    = 32
+BATCH_SIZE    = 256   # no attention matrix — memory linear in batch; GPU was at 2% before
 NUM_WORKERS   = 4
 PRECISION     = "bf16-mixed"
 

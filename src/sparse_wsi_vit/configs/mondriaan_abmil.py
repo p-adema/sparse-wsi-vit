@@ -1,6 +1,6 @@
 """ABMIL on raw RGB pixel features from the Mondriaan synthetic benchmark.
 
-Input: 4096 raw pixels (pool_size=1), each a 3-dim RGB vector.
+Input: 1024 raw pixels (32×32 image, pool_size=1), each a 3-dim RGB vector.
 input_proj_dim=256 projects 3→256 before the attention head.
 
 Expected result: ~50% accuracy (chance) on patterned — pooling destroys
@@ -31,7 +31,7 @@ IN_FEATURES  = 3      # raw RGB pixels
 OUT_FEATURES = 2      # binary, CrossEntropy
 
 # ─── Optimisation ────────────────────────────────────────────────────────────
-BATCH_SIZE    = 32    # fixed token count allows true batching
+BATCH_SIZE    = 256   # no attention matrix — memory linear in batch; GPU was at 2% before
 NUM_WORKERS   = 4
 PRECISION     = "bf16-mixed"
 

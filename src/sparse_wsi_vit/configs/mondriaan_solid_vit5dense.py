@@ -28,7 +28,7 @@ IN_FEATURES  = 3
 OUT_FEATURES = 2
 
 # ─── Optimisation ────────────────────────────────────────────────────────────
-BATCH_SIZE    = 4
+BATCH_SIZE    = 64    # 1024 tokens × 64 — attention memory is 16× smaller than 4096-token runs
 NUM_WORKERS   = 4
 PRECISION     = "bf16-mixed"
 
