@@ -1,8 +1,8 @@
 """ViT-5 Dense on raw RGB pixel features from the Mondriaan synthetic benchmark.
 
-Input: 4096 raw pixels (pool_size=1), each a 3-dim RGB vector.
+Input: 1024 raw pixels (32×32 image, pool_size=1), each a 3-dim RGB vector.
 downproj=256 up-projects 3→256 before the transformer.
-rope_dynamic_high=64 calibrates RoPE for pixel coordinates 0–63.
+rope_dynamic_high=32 calibrates RoPE for pixel coordinates 0–31.
 
 Expected result: >90% accuracy on patterned — full pairwise attention can
 compare pixel arrangements across the 4×4 objects.
@@ -60,8 +60,9 @@ def get_config() -> ExperimentConfig:
         in_features=IN_FEATURES,
         out_features=OUT_FEATURES,
         downproj=256,
+        depth=3,               # vit5_small defaults to 12; 3 blocks to match other experiments
         num_heads=4,           # 256 / 4 = 64
-        rope_dynamic_high=64,  # pixel coords 0–63
+        rope_dynamic_high=32,  # pixel coords 0–31 (32×32 image)
     )
 
     config.lightning_wrapper_class = LazyConfig(WSIAttnWrapper)(

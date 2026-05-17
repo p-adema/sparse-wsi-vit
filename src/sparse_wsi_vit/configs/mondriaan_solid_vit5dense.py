@@ -56,8 +56,9 @@ def get_config() -> ExperimentConfig:
         in_features=IN_FEATURES,
         out_features=OUT_FEATURES,
         downproj=256,
+        depth=3,               # vit5_small defaults to 12; 3 blocks to match other experiments
         num_heads=4,
-        rope_dynamic_high=64,
+        rope_dynamic_high=32,  # pixel coords 0–31 (32×32 image)
     )
 
     config.lightning_wrapper_class = LazyConfig(WSIAttnWrapper)(

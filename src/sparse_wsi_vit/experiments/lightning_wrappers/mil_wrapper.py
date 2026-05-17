@@ -137,3 +137,23 @@ class MILWrapper(LightningWrapperBase):
         acc = self.val_acc.compute()
         self.log("val/acc", acc, sync_dist=True)
         self.val_acc.reset()
+
+    def test_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        loss, _, _ = self._step(batch, self.val_acc)
+        self.log(
+            "test/loss",
+            loss,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+            batch_size=batch["input"].size(0),
+        )
+        return loss
+
+    def on_test_epoch_end(self) -> None:
+        acc = self.val_acc.compute()
+        self.log("test/acc", acc, sync_dist=True)
+        self.val_acc.reset()
