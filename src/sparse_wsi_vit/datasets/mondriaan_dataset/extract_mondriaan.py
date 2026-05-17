@@ -52,6 +52,15 @@ from tqdm import tqdm
 
 from sparse_wsi_vit.datasets.mondriaan_dataset.mondriaan import MondriaanGenerator
 
+# Background pixels are (0,0,0). Replacing them with this sentinel keeps N fixed
+# at image_size² while making all tokens non-zero, so the softmax denominator is
+# not dominated by background-to-background attention.  The value -1 is outside
+# the [0,1] RGB range and is immediately distinguishable through the linear
+# projection.  Mean-preservation for patterned objects is unaffected (all
+# background tokens are identical, so their contribution to any weighted average
+# is label-invariant).
+BACKGROUND_SENTINEL = -1.0
+
 
 def _extract_split(
     split: str,
@@ -94,6 +103,10 @@ def _extract_split(
                 [xs.ravel() * pool_size, ys.ravel() * pool_size], axis=1
             )                                                    # (N, 2) x,y
 
+        # Replace black background tokens with sentinel so all N tokens are non-zero.
+        background = (features == 0).all(axis=1)
+        features[background] = BACKGROUND_SENTINEL
+
         fname = output_dir / f"{split}_{idx:06d}_label{label}.h5"
         with h5py.File(fname, "w") as hf:
             hf.create_dataset("features", data=features.astype(np.float32),
@@ -132,8 +145,9 @@ def main():
         "min_sep":       args.min_sep,
         "pool_size":     args.pool_size,
         "random_colors": args.random_colors,
-        "n_tokens":      (args.image_size // args.pool_size) ** 2,
-        "feature_dim":   3,
+        "n_tokens":           (args.image_size // args.pool_size) ** 2,
+        "feature_dim":        3,
+        "background_sentinel": BACKGROUND_SENTINEL,
     }
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))
