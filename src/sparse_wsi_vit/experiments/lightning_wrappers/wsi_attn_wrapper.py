@@ -226,7 +226,6 @@ class WSIAttnWrapper(LightningWrapperBase):
         self.log(
             f"{kind}/logits_mean",
             logits.mean(),
-            on_step=True,
             on_epoch=True,
             batch_size=batch_size,
         )
@@ -234,7 +233,6 @@ class WSIAttnWrapper(LightningWrapperBase):
             self.log(
                 f"{kind}/logits_std",
                 logits.std(),
-                on_step=True,
                 on_epoch=True,
                 batch_size=batch_size,
             )
@@ -245,12 +243,6 @@ class WSIAttnWrapper(LightningWrapperBase):
         acc = self.val_acc.compute()
         self.log("val/acc", acc, sync_dist=True)
         self.val_acc.reset()
-        self.log("val/precision", self.val_precision.compute(), sync_dist=True)
-        self.val_precision.reset()
-        self.log("val/recall", self.val_recall.compute(), sync_dist=True)
-        self.val_recall.reset()
-        self.log("val/f1", self.val_f1.compute(), sync_dist=True)
-        self.val_f1.reset()
         self.log("val/precision", self.val_precision.compute(), sync_dist=True)
         self.val_precision.reset()
         self.log("val/recall", self.val_recall.compute(), sync_dist=True)
