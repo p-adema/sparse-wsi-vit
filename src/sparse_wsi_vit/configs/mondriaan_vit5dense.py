@@ -32,13 +32,13 @@ IN_FEATURES  = 3      # raw RGB pixels
 OUT_FEATURES = 2      # binary, CrossEntropy
 
 # ─── Optimisation ────────────────────────────────────────────────────────────
-BATCH_SIZE    = 64    # 1024 tokens × 64 — attention memory is 16× smaller than 4096-token runs
+BATCH_SIZE    = 1024
 NUM_WORKERS   = 4
 PRECISION     = "bf16-mixed"
 
 TRAINING_ITERATIONS          = 10_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
-LEARNING_RATE                = 5e-5
+LEARNING_RATE                = 2e-4
 WEIGHT_DECAY                 = 1e-4
 GRAD_CLIP                    = 1.0
 ACCUMULATE_GRAD_STEPS        = 1
