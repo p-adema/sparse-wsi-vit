@@ -34,8 +34,8 @@ FLATTEN_BLOCK = True
 
 # ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1  # Standard for MIL bags
-NUM_WORKERS = 8 if FEATURES_SCALE == 224 else 1
-WORKER_PREFETCH = 5
+NUM_WORKERS = 4 if FEATURES_SCALE == 224 else 1
+WORKER_PREFETCH = 2
 CLASS_WEIGHTS = True
 IN_FEATURES = 1280
 OUT_FEATURES = 1  # Binary tasks
