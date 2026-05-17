@@ -31,7 +31,7 @@ CSV_TRAIN_FOLD = Path("../splits/camelyon/full")
 TARGET_NAME = "is_tumor"
 TARGET_OPTIONS = ("normal", "tumor")
 FEATURES_DIR = "../camelyon-emb"
-DOWNSCALE_BLOCK = 1
+DOWNSCALE_BLOCK = 2
 FEATURES_NAME = "patches"  # "patches" or "cls"
 FEATURES_SCALE = int(os.environ.get("FEATURES_SCALE", 224))
 
