@@ -146,7 +146,7 @@ def get_config() -> ExperimentConfig:
     # Lightning wrapper mappings
     config.lightning_wrapper_class = LazyConfig(WSIAttnWrapper)(
         use_bce_loss=(OUT_FEATURES == 1),
-        training_crop_tokens=None,
+        training_crop_tokens=3_000_000,
         eval_crop_tokens=None,
         compile_mode="max-autotune-no-cudagraphs",
     )
