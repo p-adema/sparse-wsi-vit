@@ -31,7 +31,7 @@ CSV_TRAIN_FOLD = Path("../splits/camelyon/full")
 TARGET_NAME = "is_tumor"
 TARGET_OPTIONS = ("normal", "tumor")
 FEATURES_DIR = "../camelyon-emb"
-DOWNSCALE_BLOCK = 2
+DOWNSCALE_BLOCK = 1
 FEATURES_NAME = "patches"  # "patches" or "cls"
 FEATURES_SCALE = int(os.environ.get("FEATURES_SCALE", 224))
 
@@ -70,8 +70,7 @@ GRADIENT_CHECKPOINTING=True
 DEPTH=3
 HIDDEN_SIZE=256
 NUM_HEADS=4            # embed_dim // num_heads=64
-# ROPE_DYNAMIC_HIGH = 640_000 # for 112 90_500 for 224
-ROPE_DYNAMIC_HIGH = 120_000 # for 224
+ROPE_DYNAMIC_HIGH = int(850_000 * (112 / (FEATURES_SCALE*DOWNSCALE_BLOCK) ** 2)
 
 NUM_CLS=2
 MLP_RATIO=4.0
@@ -86,7 +85,7 @@ LEARNING_RATE=2e-4
 WEIGHT_DECAY=1e-2
 GRAD_CLIP=1.0
 ACCUMULATE_GRAD_STEPS=5
-PATIENCE = 10
+PATIENCE = 10 if FEATURES_SCALE*DOWNSCALE_BLOCK < 448 else 30
 MAX_DURATION = datetime.timedelta(hours=9, minutes=30)
 
 
