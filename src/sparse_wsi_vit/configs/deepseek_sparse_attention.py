@@ -30,7 +30,7 @@ TARGET_NAME = "is_tumor"
 TARGET_OPTIONS = ("normal", "tumor")
 FEATURES_DIR = Path.home() / "camelyon-emb/"
 DOWNSCALE_BLOCK = 1
-FEATURES_NAME = "cls"  # "patches" or "cls"
+FEATURES_NAME = "patches"  # "patches" or "cls"
 FEATURES_SCALE = 224
 
 SPARSE_ATTN = "dsa"
