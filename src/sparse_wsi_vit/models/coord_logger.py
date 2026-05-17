@@ -35,5 +35,5 @@ class CoordLogger(nn.Module):
                 f"  amax={coords.amax().item():.0f}"
             )
 
-        logits = torch.zeros(batch_size, self.out_features, device=x.device)
+        logits = self.head(x[:, :1, :1].squeeze(1))
         return {"logits": logits}
