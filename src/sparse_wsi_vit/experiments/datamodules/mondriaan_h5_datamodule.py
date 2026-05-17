@@ -54,13 +54,11 @@ class MondriaanFlatDataset(Dataset):
 
 
 def _collate(batch: list[dict]) -> dict:
-    assert len(batch) == 1, "MondriaanH5DataModule expects batch_size=1"
-    item = batch[0]
     return {
-        "input":      item["input"][None],
-        "label":      item["label"][None],
-        "coords":     item["coords"][None],
-        "slide_name": item["slide_name"],
+        "input":      torch.stack([b["input"] for b in batch]),   # (B, N, 3)
+        "label":      torch.stack([b["label"] for b in batch]),   # (B,)
+        "coords":     torch.stack([b["coords"] for b in batch]),  # (B, N, 2)
+        "slide_name": [b["slide_name"] for b in batch],
     }
 
 
@@ -73,7 +71,7 @@ class MondriaanH5DataModule(pl.LightningDataModule):
     Args:
         data_dir: Directory containing the flat .h5 files.
         in_features: Feature dimension (3 for raw RGB pixels).
-        batch_size: Must be 1 for MIL bags.
+        batch_size: All bags have fixed token count so batching > 1 is supported.
         num_workers: DataLoader worker processes.
     """
 

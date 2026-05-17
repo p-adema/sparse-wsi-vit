@@ -32,7 +32,7 @@ IN_FEATURES  = 3      # raw RGB pixels
 OUT_FEATURES = 2      # binary, CrossEntropy
 
 # ─── Optimisation ────────────────────────────────────────────────────────────
-BATCH_SIZE    = 1     # MIL bags
+BATCH_SIZE    = 4     # 4096 tokens × 4 — fits A100 with flash attention
 NUM_WORKERS   = 4
 PRECISION     = "bf16-mixed"
 
@@ -41,7 +41,7 @@ WARMUP_ITERATIONS_PERCENTAGE = 0.05
 LEARNING_RATE                = 5e-5
 WEIGHT_DECAY                 = 1e-4
 GRAD_CLIP                    = 1.0
-ACCUMULATE_GRAD_STEPS        = 8
+ACCUMULATE_GRAD_STEPS        = 1
 
 
 def get_config() -> ExperimentConfig:
@@ -60,7 +60,8 @@ def get_config() -> ExperimentConfig:
         in_features=IN_FEATURES,
         out_features=OUT_FEATURES,
         downproj=256,
-        rope_dynamic_high=64,  # pixel coords 0–63; default 100_000 is for WSI patch coords
+        num_heads=4,           # 256 / 4 = 64
+        rope_dynamic_high=64,  # pixel coords 0–63
     )
 
     config.lightning_wrapper_class = LazyConfig(WSIAttnWrapper)(
