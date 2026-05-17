@@ -31,8 +31,8 @@ CSV_TRAIN_FOLD = Path("../splits/camelyon/full")
 TARGET_NAME = "is_tumor"
 TARGET_OPTIONS = ("normal", "tumor")
 FEATURES_DIR = "../camelyon-emb"
-DOWNSCALE_BLOCK = 1
-FEATURES_NAME = "cls"  # "patches" or "cls"
+DOWNSCALE_BLOCK = 2
+FEATURES_NAME = "patches"  # "patches" or "cls"
 FEATURES_SCALE = int(os.environ.get("FEATURES_SCALE", 224))
 
 train_csv = str(CSV_TRAIN_FOLD / "train.csv")
@@ -85,7 +85,7 @@ LEARNING_RATE=2e-4
 WEIGHT_DECAY=1e-2
 GRAD_CLIP=1.0
 ACCUMULATE_GRAD_STEPS=5
-PATIENCE = 10
+PATIENCE = 30
 MAX_DURATION = datetime.timedelta(hours=9, minutes=30)
 
 
