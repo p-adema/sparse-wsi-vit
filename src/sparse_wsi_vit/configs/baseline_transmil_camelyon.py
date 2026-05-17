@@ -23,13 +23,13 @@ from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDat
 PIN_MEMORY = True
 
 # ─── Data ────────────────────────────────────────────────────────────────────
-CSV_TRAIN_FOLD = "../splits/camelyon/full"
+CSV_TRAIN_FOLD = "/home/scur0097/splits/camelyon/full"
 TARGET_NAME = "is_tumor"
 TARGET_OPTIONS = ("normal", "tumor")
-FEATURES_DIR = "../camelyon-emb"
+FEATURES_DIR = "/scratch-shared/scur0097/camelyon-emb"
 FEATURES_NAME = "cls"   # "cls" or "patches"
 FEATURES_SCALE = 224
-FLATTEN_BLOCK = FEATURES_NAME == "patches"
+FLATTEN_BLOCK = True
 
 # ─── Hyperparameters ─────────────────────────────────────────────
 BATCH_SIZE = 1  # Standard for MIL bags
