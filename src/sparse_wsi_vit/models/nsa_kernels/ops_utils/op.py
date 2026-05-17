@@ -11,7 +11,7 @@ import triton
 import triton.language as tl
 import triton.language.extra.libdevice as tldevice
 
-from fla_utils import IS_GATHER_SUPPORTED, IS_NVIDIA_BLACKWELL
+from sparse_wsi_vit.models.nsa_kernels.fla_utils import IS_GATHER_SUPPORTED, IS_NVIDIA_BLACKWELL
 
 if os.environ.get('FLA_USE_FAST_OPS', '0') == '1':
     @triton.jit

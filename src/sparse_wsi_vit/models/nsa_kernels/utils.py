@@ -14,7 +14,7 @@
 import triton
 import triton.language as tl
 
-from ops_utils.op import log2
+from .ops_utils.op import log2
 
 
 @triton.jit

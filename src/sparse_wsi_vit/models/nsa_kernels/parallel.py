@@ -11,13 +11,13 @@ import torch
 import triton
 import triton.language as tl
 
-from opps_attn.parallel import parallel_attn_bwd_preprocess
-from compression import parallel_nsa_compression
-from utils import _bitonic_merge
-from ops_utils import prepare_chunk_indices, prepare_chunk_offsets, prepare_lens, prepare_token_indices
-from ops_utils.op import exp, log
-from ops_utils.pooling import mean_pooling
-from fla_utils import autocast_custom_bwd, autocast_custom_fwd, autotune_cache_kwargs, check_shared_mem, contiguous
+from .bwd_preprocess import parallel_attn_bwd_preprocess
+from .compression import parallel_nsa_compression
+from .utils import _bitonic_merge
+from .ops_utils import prepare_chunk_indices, prepare_chunk_offsets, prepare_lens, prepare_token_indices
+from .ops_utils.op import exp, log
+from .ops_utils.pooling import mean_pooling
+from .fla_utils import autocast_custom_bwd, autocast_custom_fwd, autotune_cache_kwargs, check_shared_mem, contiguous
 
 try:
     from flash_attn import flash_attn_func, flash_attn_varlen_func

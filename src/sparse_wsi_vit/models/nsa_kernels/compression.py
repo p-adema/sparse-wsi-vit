@@ -9,9 +9,9 @@ import torch
 import triton
 import triton.language as tl
 
-from opps_attn.parallel import parallel_attn_bwd_preprocess
-from ops_utils import prepare_chunk_indices, prepare_chunk_offsets, prepare_token_indices
-from ops_utils.op import exp, log
+from .bwd_preprocess import parallel_attn_bwd_preprocess
+from .ops_utils import prepare_chunk_indices, prepare_chunk_offsets, prepare_token_indices
+from .ops_utils.op import exp, log
 from .fla_utils import autocast_custom_bwd, autocast_custom_fwd, autotune_cache_kwargs, check_shared_mem, contiguous
 
 

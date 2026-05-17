@@ -9,9 +9,9 @@ import torch
 import triton
 import triton.language as tl
 
-from ops_utils.cache import fla_cache_autotune
-from ops_utils.index import prepare_chunk_indices
-from fla_utils import autotune_cache_kwargs, check_shared_mem, input_guard
+from .cache import fla_cache_autotune
+from .index import prepare_chunk_indices
+from sparse_wsi_vit.models.nsa_kernels.fla_utils import autotune_cache_kwargs, check_shared_mem, input_guard
 
 BS_LIST = [32, 64] if check_shared_mem() else [16, 32]
 

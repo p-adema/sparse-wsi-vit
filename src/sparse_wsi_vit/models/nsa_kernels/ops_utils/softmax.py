@@ -9,8 +9,8 @@ import torch
 import triton
 import triton.language as tl
 
-from ops_utils.op import exp
-from fla_utils import IS_AMD, autotune_cache_kwargs
+from .op import exp
+from sparse_wsi_vit.models.nsa_kernels.fla_utils import IS_AMD, autotune_cache_kwargs
 
 NUM_WARPS_AUTOTUNE = [1, 2, 4, 8, 16] if IS_AMD else [1, 2, 4, 8, 16, 32]
 

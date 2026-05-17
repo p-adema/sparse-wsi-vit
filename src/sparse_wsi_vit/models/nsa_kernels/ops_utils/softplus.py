@@ -11,7 +11,7 @@
 import triton
 from triton import language as tl
 
-from fla_utils import IS_NVIDIA
+from sparse_wsi_vit.models.nsa_kernels.fla_utils import IS_NVIDIA
 
 
 def _generate_softplus(num_pack):

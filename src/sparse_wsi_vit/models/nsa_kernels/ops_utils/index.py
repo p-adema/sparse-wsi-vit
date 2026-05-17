@@ -10,7 +10,7 @@ import torch.nn.functional as F
 import triton
 import triton.language as tl
 
-from fla_utils import autotune_cache_kwargs, tensor_cache
+from sparse_wsi_vit.models.nsa_kernels.fla_utils import autotune_cache_kwargs, tensor_cache
 
 
 @triton.autotune(

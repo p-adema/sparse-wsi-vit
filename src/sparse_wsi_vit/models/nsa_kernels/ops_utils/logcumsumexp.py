@@ -8,8 +8,8 @@
 import triton
 import triton.language as tl
 
-from ops_utils.op import exp, log
-from fla_utils import autotune_cache_kwargs
+from .op import exp, log
+from sparse_wsi_vit.models.nsa_kernels.fla_utils import autotune_cache_kwargs
 
 
 @triton.autotune(

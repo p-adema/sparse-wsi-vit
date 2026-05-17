@@ -13,8 +13,8 @@ import torch
 import triton
 import triton.language as tl
 
-from ops_utils.op import exp
-from fla_utils import autotune_cache_kwargs, input_guard
+from sparse_wsi_vit.models.nsa_kernels.ops_utils.op import exp
+from sparse_wsi_vit.models.nsa_kernels.fla_utils import autotune_cache_kwargs, input_guard
 
 
 # `triton.jit`'ed functions can be auto-tuned by using the `triton.autotune` decorator, which consumes:

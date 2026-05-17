@@ -9,8 +9,8 @@ import torch
 import triton
 import triton.language as tl
 
-from ops_utils.index import prepare_chunk_indices
-from fla_utils import autocast_custom_bwd, autocast_custom_fwd, autotune_cache_kwargs, input_guard
+from .index import prepare_chunk_indices
+from sparse_wsi_vit.models.nsa_kernels.fla_utils import autocast_custom_bwd, autocast_custom_fwd, autotune_cache_kwargs, input_guard
 
 
 @triton.heuristics({

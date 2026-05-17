@@ -11,9 +11,9 @@ import torch
 import triton
 import triton.language as tl
 
-from ops_utils.index import prepare_chunk_indices
-from ops_utils.op import make_tensor_descriptor
-from fla_utils import IS_TMA_SUPPORTED, autotune_cache_kwargs, input_guard
+from .index import prepare_chunk_indices
+from .op import make_tensor_descriptor
+from sparse_wsi_vit.models.nsa_kernels.fla_utils import IS_TMA_SUPPORTED, autotune_cache_kwargs, input_guard
 
 FLA_TRIL_PRECISION = os.environ.get('FLA_TRIL_PRECISION', 'ieee')
 assert FLA_TRIL_PRECISION in ['ieee', 'tf32', 'tf32x3'], \
