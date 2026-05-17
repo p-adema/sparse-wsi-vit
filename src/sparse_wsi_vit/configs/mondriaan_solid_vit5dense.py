@@ -28,7 +28,7 @@ IN_FEATURES  = 3
 OUT_FEATURES = 2
 
 # ─── Optimisation ────────────────────────────────────────────────────────────
-BATCH_SIZE    = 1024
+BATCH_SIZE    = 256
 NUM_WORKERS   = 4
 PRECISION     = "bf16-mixed"
 
