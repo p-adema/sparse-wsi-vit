@@ -70,7 +70,7 @@ GRADIENT_CHECKPOINTING=True
 DEPTH=3
 HIDDEN_SIZE=256
 NUM_HEADS=4            # embed_dim // num_heads=64
-ROPE_DYNAMIC_HIGH = int(850_000 * (112 / (FEATURES_SCALE*DOWNSCALE_BLOCK)) ** 2)
+ROPE_DYNAMIC_HIGH = 220_000 # should work across the board, since coords are in pixel space
 
 NUM_CLS=2
 MLP_RATIO=4.0
@@ -119,31 +119,29 @@ def get_config() -> ExperimentConfig:
         pin_memory=PIN_MEMORY,
     )
 
-    # config.net=LazyConfig(SparseViT5SlideEncoder)(
-    #     in_features=IN_FEATURES,
-    #     out_features=OUT_FEATURES,
-    #     embed_dim=HIDDEN_SIZE,
-    #     num_heads=NUM_HEADS,
-    #     depth=DEPTH,
-    #     num_cls=NUM_CLS,
-    #     sparse_attn=SPARSE_ATTN,
-    #     # StaticSparseAttention kwargs
-    #     window_size=WINDOW_SIZE,
-    #     chunk_size=CHUNK_SIZE,
-    #     flex_block_size=FLEX_BLOCK_SIZE,
-    #     rope_theta=ROPE_THETA,
-    #     rope_coord_high=ROPE_DYNAMIC_HIGH,
-    #     # Shared kwargs
-    #     mlp_ratio=MLP_RATIO,
-    #     proj_dropout=PROJ_DROPOUT,
-    #     drop_path_rate=DROP_PATH_RATE,
-    #     layer_scale=LAYER_SCALE,
-    #     init_scale=INIT_SCALE,
-    #     gradient_checkpointing=GRADIENT_CHECKPOINTING,
-    #     use_hilbert_sort=USE_HILBERT_SORT
-    # )
-
-    config.net = LazyConfig(CoordLogger)(out_features=OUT_FEATURES)
+    config.net=LazyConfig(SparseViT5SlideEncoder)(
+        in_features=IN_FEATURES,
+        out_features=OUT_FEATURES,
+        embed_dim=HIDDEN_SIZE,
+        num_heads=NUM_HEADS,
+        depth=DEPTH,
+        num_cls=NUM_CLS,
+        sparse_attn=SPARSE_ATTN,
+        # StaticSparseAttention kwargs
+        window_size=WINDOW_SIZE,
+        chunk_size=CHUNK_SIZE,
+        flex_block_size=FLEX_BLOCK_SIZE,
+        rope_theta=ROPE_THETA,
+        rope_coord_high=ROPE_DYNAMIC_HIGH,
+        # Shared kwargs
+        mlp_ratio=MLP_RATIO,
+        proj_dropout=PROJ_DROPOUT,
+        drop_path_rate=DROP_PATH_RATE,
+        layer_scale=LAYER_SCALE,
+        init_scale=INIT_SCALE,
+        gradient_checkpointing=GRADIENT_CHECKPOINTING,
+        use_hilbert_sort=USE_HILBERT_SORT
+    )
 
     # Lightning wrapper mappings
     config.lightning_wrapper_class = LazyConfig(WSIAttnWrapper)(
