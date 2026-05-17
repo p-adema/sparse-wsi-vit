@@ -23,7 +23,7 @@ from sparse_wsi_vit.models.sparse_vit5_slide_encoder import SparseViT5SlideEncod
 from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import WSIAttnWrapper
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 from sparse_wsi_vit.experiments.callbacks import AttentionMapCallback
-
+from sparse_wsi_vit.models.coord_logger import CoordLogger
 PIN_MEMORY = True
 
 # ─── Data Details ──────────────────────────────────────────────
@@ -119,29 +119,31 @@ def get_config() -> ExperimentConfig:
         pin_memory=PIN_MEMORY,
     )
 
-    config.net=LazyConfig(SparseViT5SlideEncoder)(
-        in_features=IN_FEATURES,
-        out_features=OUT_FEATURES,
-        embed_dim=HIDDEN_SIZE,
-        num_heads=NUM_HEADS,
-        depth=DEPTH,
-        num_cls=NUM_CLS,
-        sparse_attn=SPARSE_ATTN,
-        # StaticSparseAttention kwargs
-        window_size=WINDOW_SIZE,
-        chunk_size=CHUNK_SIZE,
-        flex_block_size=FLEX_BLOCK_SIZE,
-        rope_theta=ROPE_THETA,
-        rope_coord_high=ROPE_DYNAMIC_HIGH,
-        # Shared kwargs
-        mlp_ratio=MLP_RATIO,
-        proj_dropout=PROJ_DROPOUT,
-        drop_path_rate=DROP_PATH_RATE,
-        layer_scale=LAYER_SCALE,
-        init_scale=INIT_SCALE,
-        gradient_checkpointing=GRADIENT_CHECKPOINTING,
-        use_hilbert_sort=USE_HILBERT_SORT
-    )
+    # config.net=LazyConfig(SparseViT5SlideEncoder)(
+    #     in_features=IN_FEATURES,
+    #     out_features=OUT_FEATURES,
+    #     embed_dim=HIDDEN_SIZE,
+    #     num_heads=NUM_HEADS,
+    #     depth=DEPTH,
+    #     num_cls=NUM_CLS,
+    #     sparse_attn=SPARSE_ATTN,
+    #     # StaticSparseAttention kwargs
+    #     window_size=WINDOW_SIZE,
+    #     chunk_size=CHUNK_SIZE,
+    #     flex_block_size=FLEX_BLOCK_SIZE,
+    #     rope_theta=ROPE_THETA,
+    #     rope_coord_high=ROPE_DYNAMIC_HIGH,
+    #     # Shared kwargs
+    #     mlp_ratio=MLP_RATIO,
+    #     proj_dropout=PROJ_DROPOUT,
+    #     drop_path_rate=DROP_PATH_RATE,
+    #     layer_scale=LAYER_SCALE,
+    #     init_scale=INIT_SCALE,
+    #     gradient_checkpointing=GRADIENT_CHECKPOINTING,
+    #     use_hilbert_sort=USE_HILBERT_SORT
+    # )
+
+    config.net = LazyConfig(CoordLogger)(out_features=OUT_FEATURES)
 
     # Lightning wrapper mappings
     config.lightning_wrapper_class = LazyConfig(WSIAttnWrapper)(
