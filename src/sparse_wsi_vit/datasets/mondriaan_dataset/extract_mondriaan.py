@@ -61,6 +61,7 @@ def _extract_split(
     min_sep: int,
     pool_size: int,
     output_dir: Path,
+    random_colors: bool = False,
 ):
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -70,6 +71,7 @@ def _extract_split(
             object_type=object_type,
             target_label=idx % 2,   # balanced labels within each split
             min_sep=min_sep,
+            random_colors=random_colors,
         )
 
         if pool_size == 1:
@@ -112,6 +114,8 @@ def main():
     parser.add_argument("--min_sep",     type=int,  default=8)
     parser.add_argument("--pool_size",   type=int,  default=1,
                         help="Spatial pooling before saving (1=pixel, 2=quadrant-level, 4=object-level).")
+    parser.add_argument("--random_colors", action="store_true",
+                        help="Sample 4 random colours per image instead of fixed {R,C,G,M}.")
     args = parser.parse_args()
 
     if args.image_size % args.pool_size != 0:
@@ -120,15 +124,16 @@ def main():
         )
 
     metadata = {
-        "train_size":  args.train_size,
-        "val_size":    args.val_size,
-        "test_size":   args.test_size,
-        "image_size":  args.image_size,
-        "object_type": args.object_type,
-        "min_sep":     args.min_sep,
-        "pool_size":   args.pool_size,
-        "n_tokens":    (args.image_size // args.pool_size) ** 2,
-        "feature_dim": 3,
+        "train_size":    args.train_size,
+        "val_size":      args.val_size,
+        "test_size":     args.test_size,
+        "image_size":    args.image_size,
+        "object_type":   args.object_type,
+        "min_sep":       args.min_sep,
+        "pool_size":     args.pool_size,
+        "random_colors": args.random_colors,
+        "n_tokens":      (args.image_size // args.pool_size) ** 2,
+        "feature_dim":   3,
     }
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))
@@ -148,6 +153,7 @@ def main():
             min_sep=args.min_sep,
             pool_size=args.pool_size,
             output_dir=args.output_dir,
+            random_colors=args.random_colors,
         )
 
     print("\nDone.")

@@ -37,7 +37,7 @@ from collections import Counter
 
 import numpy as np
 
-# ── base colours ──────────────────────────────────────────────────────────────
+# ── fixed base colours (used when random_colors=False) ───────────────────────
 # Mean of {RED, CYAN, GREEN, MAGENTA} = (0.5, 0.5, 0.5) under any permutation.
 RED     = np.array([1.0, 0.0, 0.0], dtype=np.float32)
 CYAN    = np.array([0.0, 1.0, 1.0], dtype=np.float32)
@@ -46,7 +46,7 @@ MAGENTA = np.array([1.0, 0.0, 1.0], dtype=np.float32)
 
 _R, _C, _G, _M = RED, CYAN, GREEN, MAGENTA
 
-# ── patterned vocabulary ──────────────────────────────────────────────────────
+# ── patterned vocabulary (fixed-colour mode) ──────────────────────────────────
 # 6 permutations of {R,C,G,M}; pixel order is [TL, TR, BL, BR].
 # All pairwise Hamming distances are 3 or 4 (verified exhaustively).
 PATTERNED_VOCAB = [
@@ -61,7 +61,20 @@ PATTERNED_NAMES = [
     "RC/GM", "CR/MG", "GM/RC", "MG/CR", "RG/MC", "CM/GR",
 ]
 
-# ── solid-colour control vocabulary ──────────────────────────────────────────
+# ── permutation indices shared between fixed and random-colour modes ──────────
+# These define the 6 arrangement types as index permutations of [c0,c1,c2,c3].
+# Hamming distance ≥ 3 between any two rows (property of the permutations,
+# independent of the specific colours chosen).
+_PATTERNED_PERMS = [
+    [0, 1, 2, 3],
+    [1, 0, 3, 2],
+    [2, 3, 0, 1],
+    [3, 2, 1, 0],
+    [0, 2, 3, 1],
+    [1, 3, 2, 0],
+]
+
+# ── solid-colour control vocabulary (fixed-colour mode) ───────────────────────
 # Mean colour IS discriminative (label=1 biases the mean; label=0 is grey).
 SOLID_VOCAB = [
     [_R, _R, _R, _R],  # 0 – solid red
@@ -109,6 +122,7 @@ class MondriaanGenerator:
         object_type: str = "patterned",
         target_label: int | None = None,
         min_sep: int = 16,
+        random_colors: bool = False,
     ):
         """Generate one Mondriaan sample.
 
@@ -123,6 +137,13 @@ class MondriaanGenerator:
             Force label to 0 or 1. None → chosen uniformly at random.
         min_sep:
             Minimum Euclidean distance between object top-left corners (px).
+        random_colors:
+            If True, sample 4 colours uniformly from [0,1]^3 per image and
+            apply the fixed permutation structures to them. The mean-preservation
+            property still holds (each object uses all 4 colours once), so
+            pooling-based aggregators still provably fail on patterned. However,
+            matching-pair objects are now pixel-identical at each quadrant
+            position, providing a non-zero gradient signal from initialisation.
 
         Returns
         -------
@@ -131,7 +152,14 @@ class MondriaanGenerator:
         obj_types : list[int], indices into the vocabulary (length 4)
         positions : list[tuple[int, int]], top-left (y, x) corners (length 4)
         """
-        vocab = PATTERNED_VOCAB if object_type == "patterned" else SOLID_VOCAB
+        if random_colors:
+            base = np.random.uniform(0, 1, size=(4, 3)).astype(np.float32)
+            if object_type == "patterned":
+                vocab = [[base[i] for i in perm] for perm in _PATTERNED_PERMS]
+            else:
+                vocab = [[base[i]] * 4 for i in range(4)]
+        else:
+            vocab = PATTERNED_VOCAB if object_type == "patterned" else SOLID_VOCAB
         n_types = len(vocab)
 
         image = np.zeros((image_size, image_size, 3), dtype=np.float32)
@@ -266,6 +294,8 @@ if __name__ == "__main__":
         "--object_type", choices=["patterned", "solid"], default="patterned",
     )
     parser.add_argument("--min_sep", type=int, default=8)
+    parser.add_argument("--random_colors", action="store_true",
+                        help="Sample 4 random colours per image instead of fixed {R,C,G,M}.")
     parser.add_argument("--visualize", action="store_true")
     parser.add_argument("--n_samples", type=int, default=4)
     parser.add_argument("--image_only", action="store_true",
@@ -285,12 +315,14 @@ if __name__ == "__main__":
             zoom=args.zoom,
             image_size=args.image_size,
             min_sep=args.min_sep,
+            random_colors=args.random_colors,
         )
     else:
         img, lbl, types, pos = MondriaanGenerator.generate_single(
             image_size=args.image_size,
             object_type=args.object_type,
             min_sep=args.min_sep,
+            random_colors=args.random_colors,
         )
         names = PATTERNED_NAMES if args.object_type == "patterned" else SOLID_NAMES
         print(f"label={lbl}  types={[names[t] for t in types]}  positions={pos}")
