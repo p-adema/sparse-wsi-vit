@@ -45,6 +45,7 @@ class WSIAttnWrapper(LightningWrapperBase):
         self.val_precision = torchmetrics.Precision(**prf_kwargs)
         self.val_recall = torchmetrics.Recall(**prf_kwargs)
         self.val_f1 = torchmetrics.F1Score(**prf_kwargs)
+        self.val_auc = torchmetrics.AUROC(**prf_kwargs)
 
         self.use_bce_loss = use_bce_loss
         self.training_crop_tokens = training_crop_tokens
@@ -210,6 +211,7 @@ class WSIAttnWrapper(LightningWrapperBase):
         self.val_precision.update(preds, labels)
         self.val_recall.update(preds, labels)
         self.val_f1.update(preds, labels)
+        self.val_auc.update(preds, labels)
         self.log(
             f"{kind}/loss",
             loss,
@@ -242,9 +244,8 @@ class WSIAttnWrapper(LightningWrapperBase):
         return loss
 
     def on_validation_epoch_end(self) -> None:
-        """Log epoch-level validation accuracy, precision, recall and F1, then reset."""
-        acc = self.val_acc.compute()
-        self.log("val/acc", acc, sync_dist=True)
+        """Log epoch-level validation accuracy, precision, recall, F1, and AUC."""
+        self.log("val/acc", self.val_acc.compute(), sync_dist=True)
         self.val_acc.reset()
         self.log("val/precision", self.val_precision.compute(), sync_dist=True)
         self.val_precision.reset()
@@ -252,11 +253,12 @@ class WSIAttnWrapper(LightningWrapperBase):
         self.val_recall.reset()
         self.log("val/f1", self.val_f1.compute(), sync_dist=True)
         self.val_f1.reset()
+        self.log("val/auc", self.val_auc.compute(), sync_dist=True)
+        self.val_auc.reset()
 
     def on_test_epoch_end(self) -> None:
-        """Log epoch-level validation accuracy, precision, recall and F1, then reset."""
-        acc = self.val_acc.compute()
-        self.log("test/acc", acc, sync_dist=True)
+        """Log epoch-level test accuracy, precision, recall, F1, and AUC"""
+        self.log("test/acc", self.val_acc.compute(), sync_dist=True)
         self.val_acc.reset()
         self.log("test/precision", self.val_precision.compute(), sync_dist=True)
         self.val_precision.reset()
@@ -264,3 +266,5 @@ class WSIAttnWrapper(LightningWrapperBase):
         self.val_recall.reset()
         self.log("test/f1", self.val_f1.compute(), sync_dist=True)
         self.val_f1.reset()
+        self.log("test/auc", self.val_auc.compute(), sync_dist=True)
+        self.val_auc.reset()
