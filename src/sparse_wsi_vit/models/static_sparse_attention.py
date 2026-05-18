@@ -81,11 +81,15 @@ def build_block_mask(
         for i, kvb in enumerate(kv_list):
             kv_indices[0, 0, qb, i] = kvb
 
-    return BlockMask.from_kv_blocks(
+    return BlockMask(
         kv_num_blocks=kv_num_blocks,
         kv_indices=kv_indices,
         full_kv_num_blocks=None,
         full_kv_indices=None,
+        q_num_blocks=kv_num_blocks,
+        q_indices=kv_indices,
+        full_q_num_blocks=None,
+        full_q_indices=None,
         BLOCK_SIZE=(flex_block_size, flex_block_size),
         mask_mod=mask_mod,
         seq_lengths=(seq_len, seq_len),
