@@ -20,6 +20,18 @@ from sparse_wsi_vit.models.static_sparse_attention import (
 
 _SPARSE_ATTN_TYPES = ("static")
 
+
+def _block_attn_half(block: Block, x: Tensor, coords: Tensor | None) -> Tensor:
+    if block.layer_scale:
+        return x + block.drop_path(block.gamma_1 * block.attn(block.norm1(x), coords))
+    return x + block.drop_path(block.attn(block.norm1(x), coords))
+
+
+def _block_mlp_half(block: Block, x: Tensor) -> Tensor:
+    if block.layer_scale:
+        return x + block.drop_path(block.gamma_2 * block.mlp(block.norm2(x)))
+    return x + block.drop_path(block.mlp(block.norm2(x)))
+
 class SparseViT5SlideEncoder(nn.Module):
     """WSI slide encoder: ViT-5 blocks with configurable sparse attention.
 
@@ -184,7 +196,10 @@ class SparseViT5SlideEncoder(nn.Module):
 
         for block in self.blocks:
             if self.gradient_checkpointing and self.training:
-                x = checkpoint(block, x, coords, use_reentrant=False)
+                attn_fn = partial(_block_attn_half, block)
+                mlp_fn = partial(_block_mlp_half, block)
+                x = checkpoint(attn_fn, x, coords, use_reentrant=False)
+                x = checkpoint(mlp_fn, x, use_reentrant=False)
             else:
                 x = block(x, coords)
 
