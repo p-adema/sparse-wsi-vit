@@ -208,9 +208,31 @@ class WSIAttnWrapper(LightningWrapperBase):
         gc.collect()
         torch.cuda.empty_cache()
         self._maybe_crop_batch(batch, self.eval_crop_tokens)
+
         t0 = time.perf_counter()
-        with torch.inference_mode():
-            loss, preds, output_dict = self._step(batch, self.val_acc)
+        used_cpu = False
+
+        if self.validation_on_cpu:
+            try:
+                # Try GPU first
+                self.network.to(self.device)  # usually cuda
+                with torch.inference_mode():
+                    loss, preds, output_dict = self._step(batch, self.val_acc)
+            except RuntimeError as e:
+                # Fallback to CPU only on CUDA OOM
+                if "out of memory" not in str(e):
+                    raise
+                torch.cuda.empty_cache()
+                self.network.to("cpu")
+                with torch.inference_mode():
+                    loss, preds, output_dict = self._step(batch, self.val_acc)
+                used_cpu = True
+                # Move back to GPU for subsequent training/val
+                self.network.to(self.device)
+        else:
+            with torch.inference_mode():
+                loss, preds, output_dict = self._step(batch, self.val_acc)
+
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         step_ms = (time.perf_counter() - t0) * 1000
