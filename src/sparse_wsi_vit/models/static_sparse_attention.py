@@ -244,7 +244,8 @@ class StaticSparseAttention(nn.Module):
             seq_len, num_cls, chunk_size, window_size,
             self.flex_block_size, x.device, mask_mod,
         )
-        out = compiled_flex_attention(q, k, v, block_mask=block_mask)
+        attn_fn = compiled_flex_attention if self.training else flex_attention
+        out = attn_fn(q, k, v, block_mask=block_mask)
 
         out = out.transpose(1, 2).reshape(batch_size, seq_len, embed_dim)
         return self.out_proj(out)
