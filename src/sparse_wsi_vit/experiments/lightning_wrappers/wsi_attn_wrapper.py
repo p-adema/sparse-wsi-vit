@@ -21,8 +21,11 @@ class WSIAttnWrapper(LightningWrapperBase):
         training_crop_tokens: int | None = None,
         eval_crop_tokens: int | None = None,
         compile_mode: str | None = None,
+        validation_on_cpu: Bool = False
     ):
         super().__init__(network=network, cfg=cfg)
+
+        self.validation_on_cpu = validation_on_cpu
 
         self.multiclass = hasattr(network, "out_features") and network.out_features > 1
 
@@ -242,6 +245,14 @@ class WSIAttnWrapper(LightningWrapperBase):
                 batch_size=batch_size,
             )
         return loss
+
+     def on_validation_start(self) -> None:
+        if self.validation_on_cpu:
+            self.network.to("cpu")
+
+    def on_validation_end(self) -> None:
+        if self.validation_on_cpu:
+            self.network.to("cuda")
 
     def on_validation_epoch_end(self) -> None:
         """Log epoch-level validation accuracy, precision, recall, F1, and AUC."""

@@ -150,6 +150,7 @@ def get_config() -> ExperimentConfig:
         training_crop_tokens=None,
         eval_crop_tokens=None,
         compile_mode="max-autotune-no-cudagraphs",
+        validation_on_cpu=True
     )
 
 

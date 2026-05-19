@@ -14,10 +14,10 @@ from torch.nn.attention.flex_attention import flex_attention, BlockMask
 
 from sparse_wsi_vit.models.vit_5.rope import VisionRotaryEmbedding
 
-def _flex(q, k, v, block_mask):
-    return flex_attention(q, k, v, block_mask=block_mask)
-
-compiled_flex_attention = torch.compile(_flex, dynamic=False)
+compiled_flex_attention = torch.compile(
+    partial(flex_attention, kernel_options={"BACKEND": "TRITON"}),
+    dynamic=True,
+)
 
 def build_block_mask(
     seq_len: int,
