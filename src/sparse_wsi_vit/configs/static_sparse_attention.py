@@ -62,8 +62,7 @@ SPARSE_ATTN="static"
 # ─── Shared hyperparameters ──────────────────────────────────────────────────
 BATCH_SIZE=1
 NUM_WORKERS = 8 if FEATURES_SCALE == 224 else 1
-# WORKER_PREFETCH=2
-WORKER_PREFETCH=8
+WORKER_PREFETCH=2
 CLASS_WEIGHTS=True
 IN_FEATURES=1280
 OUT_FEATURES=1
@@ -82,15 +81,13 @@ DROP_PATH_RATE=0.1
 LAYER_SCALE=True
 INIT_SCALE=1e-4
 
-TRAINING_ITERATIONS=10 # todo
-# WARMUP_ITERATIONS_PERCENTAGE=0.05
-WARMUP_ITERATIONS_PERCENTAGE=0.1
+TRAINING_ITERATIONS=1000
+WARMUP_ITERATIONS_PERCENTAGE=0.05
 LEARNING_RATE=2e-4
 WEIGHT_DECAY=1e-2
 GRAD_CLIP=1.0
 ACCUMULATE_GRAD_STEPS=5
-# PATIENCE = 10 if FEATURES_SCALE*DOWNSCALE_BLOCK < 448 else 30
-PATIENCE = 0
+PATIENCE = 10 if FEATURES_SCALE*DOWNSCALE_BLOCK < 448 else 30
 MAX_DURATION = datetime.timedelta(hours=9, minutes=30)
 
 
@@ -173,14 +170,14 @@ def get_config() -> ExperimentConfig:
         accumulate_grad_steps=ACCUMULATE_GRAD_STEPS,
     )
 
-    config.trainer = TrainerConfig(
-        num_sanity_val_steps=0,
-        val_check_interval=0.0
-    )
+    # config.trainer = TrainerConfig(
+    #     num_sanity_val_steps=0,
+    #     val_check_interval=1.0
+    # )
 # todo
     # Scheduler
     config.scheduler = SchedulerConfig(
-        name="reduce_iters_cosine",
+        name="cosine",
         warmup_iterations_percentage=WARMUP_ITERATIONS_PERCENTAGE,
         total_iterations=TRAINING_ITERATIONS,
         mode="max",
