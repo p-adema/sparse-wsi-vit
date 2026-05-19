@@ -167,8 +167,7 @@ def get_config() -> ExperimentConfig:
         iterations=TRAINING_ITERATIONS,
         grad_clip=GRAD_CLIP,
         precision=PRECISION,
-        accumulate_grad_steps=ACCUMULATE_GRAD_STEPS,
-        num_sanity_val_steps=0
+        accumulate_grad_steps=ACCUMULATE_GRAD_STEPS
     )
 
     config.trainer = TrainerConfig(
