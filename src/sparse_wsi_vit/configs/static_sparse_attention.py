@@ -62,7 +62,7 @@ SPARSE_ATTN="static"
 # ─── Shared hyperparameters ──────────────────────────────────────────────────
 BATCH_SIZE=1
 # NUM_WORKERS = 8 if FEATURES_SCALE == 224 else 1
-NUM_WORKERS = os.cpu_count // 2
+NUM_WORKERS = os.cpu_count() // 2
 WORKER_PREFETCH=2
 CLASS_WEIGHTS=True
 IN_FEATURES=1280
