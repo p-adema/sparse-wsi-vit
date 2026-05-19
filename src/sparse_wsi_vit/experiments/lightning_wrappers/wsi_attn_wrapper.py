@@ -116,7 +116,9 @@ class WSIAttnWrapper(LightningWrapperBase):
         if "class_weight" in batch:
             loss *= batch["class_weight"]
 
-        accuracy_calculator.update(preds, labels)
+        metric_device = getattr(accuracy_calculator, "device", next(self.parameters()).device)
+        accuracy_calculator.update(preds.to(metric_device), labels.to(metric_device))
+
         return loss, preds, output_dict
 
     def training_step(
