@@ -16,6 +16,7 @@ from sparse_wsi_vit.experiments.default_cfg import (
     SchedulerConfig,
     TrainConfig,
     WandbConfig,
+    TrainerConfig,
 )
 from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
 
@@ -167,6 +168,11 @@ def get_config() -> ExperimentConfig:
         grad_clip=GRAD_CLIP,
         precision=PRECISION,
         accumulate_grad_steps=ACCUMULATE_GRAD_STEPS,
+        num_sanity_val_steps=0
+    )
+
+    config.trainer = TrainerConfig(
+        num_sanity_val_steps=0
     )
 
     # Scheduler
