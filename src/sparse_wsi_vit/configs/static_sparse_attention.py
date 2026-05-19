@@ -80,7 +80,7 @@ DROP_PATH_RATE=0.1
 LAYER_SCALE=True
 INIT_SCALE=1e-4
 
-TRAINING_ITERATIONS=2
+TRAINING_ITERATIONS=10 # todo
 WARMUP_ITERATIONS_PERCENTAGE=0.05
 LEARNING_RATE=2e-4
 WEIGHT_DECAY=1e-2
@@ -172,16 +172,16 @@ def get_config() -> ExperimentConfig:
     config.trainer = TrainerConfig(
         num_sanity_val_steps=0
     )
-
+# todo
     # Scheduler
-    config.scheduler = SchedulerConfig(
-        name="cosine",
-        warmup_iterations_percentage=WARMUP_ITERATIONS_PERCENTAGE,
-        total_iterations=TRAINING_ITERATIONS,
-        mode="max",
-        patience=PATIENCE,
-        max_duration=MAX_DURATION,
-    )
+    # config.scheduler = SchedulerConfig(
+    #     name="cosine",
+    #     warmup_iterations_percentage=WARMUP_ITERATIONS_PERCENTAGE,
+    #     total_iterations=TRAINING_ITERATIONS,
+    #     mode="max",
+    #     patience=PATIENCE,
+    #     max_duration=MAX_DURATION,
+    # )
 
     # W&B Logging
     config.wandb = WandbConfig(
