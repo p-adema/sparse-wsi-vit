@@ -172,7 +172,8 @@ def get_config() -> ExperimentConfig:
     )
 
     config.trainer = TrainerConfig(
-        num_sanity_val_steps=0
+        num_sanity_val_steps=0,
+        val_check_interval=0.0
     )
 # todo
     # Scheduler
