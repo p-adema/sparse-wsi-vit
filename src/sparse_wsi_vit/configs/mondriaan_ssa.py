@@ -32,8 +32,26 @@ EMBED_DIM   = 256
 NUM_HEADS   = 4      # 256 / 4 = 64 dim per head
 NUM_LAYERS  = 3
 NUM_CLS     = 2
-WINDOW_SIZE = 2
-DILATION    = 1
+WINDOW_SIZE = 4
+
+GRADIENT_CHECKPOINTING=True # Todo: @Lucius, check ff wat je hiermee wil.
+
+DEPTH=3
+HIDDEN_SIZE=256
+NUM_HEADS=4            # embed_dim // num_heads=64
+ROPE_DYNAMIC_HIGH = 220_000 # should work across the board, since coords are in pixel space
+
+NUM_CLS=2
+MLP_RATIO=4.0
+PROJ_DROPOUT=0.2
+DROP_PATH_RATE=0.1
+LAYER_SCALE=True
+INIT_SCALE=1e-4
+
+CHUNK_SIZE=256           # patches per logical chunk (must be multiple of FLEX_BLOCK_SIZE)
+FLEX_BLOCK_SIZE=128      # FlexAttention kernel tile size
+ROPE_THETA=10_000.0
+USE_HILBERT_SORT = True
 
 # ─── Optimisation ────────────────────────────────────────────────────────────
 BATCH_SIZE    = 256
@@ -60,15 +78,27 @@ def get_config() -> ExperimentConfig:
         num_workers=NUM_WORKERS,
     )
 
-    config.net = LazyConfig(StaticSparseViTSlideEncoder)(
+    config.net=LazyConfig(SparseViT5SlideEncoder)(
         in_features=IN_FEATURES,
         out_features=OUT_FEATURES,
         embed_dim=EMBED_DIM,
         num_heads=NUM_HEADS,
-        num_layers=NUM_LAYERS,
+        depth=NUM_LAYERS,
         num_cls=NUM_CLS,
+        sparse_attn="static",
         window_size=WINDOW_SIZE,
-        dilation=DILATION,
+        chunk_size=CHUNK_SIZE,
+        flex_block_size=FLEX_BLOCK_SIZE,
+        rope_theta=ROPE_THETA,
+        rope_coord_high=ROPE_DYNAMIC_HIGH,
+        # Shared kwargs
+        mlp_ratio=MLP_RATIO,
+        proj_dropout=PROJ_DROPOUT,
+        drop_path_rate=DROP_PATH_RATE,
+        layer_scale=LAYER_SCALE,
+        init_scale=INIT_SCALE,
+        gradient_checkpointing=GRADIENT_CHECKPOINTING,
+        use_hilbert_sort=USE_HILBERT_SORT
     )
 
     config.lightning_wrapper_class = LazyConfig(MILWrapper)(
