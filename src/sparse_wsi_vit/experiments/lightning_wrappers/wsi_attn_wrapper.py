@@ -246,7 +246,7 @@ class WSIAttnWrapper(LightningWrapperBase):
             )
         return loss
 
-     def on_validation_start(self) -> None:
+    def on_validation_start(self) -> None:
         if self.validation_on_cpu:
             self.network.to("cpu")
 
