@@ -17,7 +17,7 @@ from sparse_wsi_vit.models.vit_5.rope import VisionRotaryEmbedding
 def _flex(q, k, v, block_mask):
     return flex_attention(q, k, v, block_mask=block_mask)
 
-compiled_flex_attention = _flex
+compiled_flex_attention = torch.compile(_flex, dynamic=False)
 
 def build_block_mask(
     seq_len: int,
