@@ -218,10 +218,15 @@ class WSIAttnWrapper(LightningWrapperBase):
         labels = batch["label"]
         batch_size = batch["input"].size(0)
         num_patches = batch["input"].size(1)
-        self.val_precision.update(preds, labels)
-        self.val_recall.update(preds, labels)
-        self.val_f1.update(preds, labels)
-        self.val_auc.update(preds, labels)
+
+        metric_device = self.device
+        preds_m = preds.to(metric_device)
+        labels_m = labels.to(metric_device)
+
+        self.val_precision.update(preds_m, labels_m)
+        self.val_recall.update(preds_m, labels_m)
+        self.val_f1.update(preds_m, labels_m)
+        self.val_auc.update(preds_m, labels_m)
         self.log(
             f"{kind}/loss",
             loss,
