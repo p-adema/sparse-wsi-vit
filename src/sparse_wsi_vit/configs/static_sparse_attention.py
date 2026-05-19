@@ -81,7 +81,8 @@ LAYER_SCALE=True
 INIT_SCALE=1e-4
 
 TRAINING_ITERATIONS=10 # todo
-WARMUP_ITERATIONS_PERCENTAGE=0.05
+# WARMUP_ITERATIONS_PERCENTAGE=0.05
+WARMUP_ITERATIONS_PERCENTAGE=0.1
 LEARNING_RATE=2e-4
 WEIGHT_DECAY=1e-2
 GRAD_CLIP=1.0
@@ -176,12 +177,12 @@ def get_config() -> ExperimentConfig:
 # todo
     # Scheduler
     config.scheduler = SchedulerConfig(
-        name=None
-        # warmup_iterations_percentage=WARMUP_ITERATIONS_PERCENTAGE,
-        # total_iterations=TRAINING_ITERATIONS,
-        # mode="max",
-        # patience=PATIENCE,
-        # max_duration=MAX_DURATION,
+        name="reduce_iters_cosine",
+        warmup_iterations_percentage=WARMUP_ITERATIONS_PERCENTAGE,
+        total_iterations=TRAINING_ITERATIONS,
+        mode="max",
+        patience=PATIENCE,
+        max_duration=MAX_DURATION,
     )
 
     # W&B Logging

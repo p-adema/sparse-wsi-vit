@@ -209,7 +209,7 @@ def construct_scheduler(
     Returns:
         torch.optim.lr_scheduler.LRScheduler: The constructed scheduler.
     """
-    assert scheduler_cfg.name in [PLACEHOLDER, "cosine"], (
+    assert scheduler_cfg.name in [PLACEHOLDER, "cosine", "reduce_iters_cosine"], (
         f"scheduler_cfg.name must be either {PLACEHOLDER} or 'cosine'. Got {scheduler_cfg.name}"
     )
     if scheduler_cfg.name != PLACEHOLDER:
@@ -246,6 +246,10 @@ def construct_scheduler(
             T_max=total_iterations - warmup_iterations,
             last_epoch=-warmup_iterations,
         )
+
+    elif scheduler_type == "reduce_iters_cosine":
+        lr_scheduler = None
+        warmup_scheduler = None
 
     else:
         lr_scheduler = None
