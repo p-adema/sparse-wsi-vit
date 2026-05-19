@@ -176,12 +176,12 @@ def get_config() -> ExperimentConfig:
 # todo
     # Scheduler
     config.scheduler = SchedulerConfig(
-        name="reduce_iters_cosine",
-        warmup_iterations_percentage=WARMUP_ITERATIONS_PERCENTAGE,
-        total_iterations=TRAINING_ITERATIONS,
-        mode="max",
-        patience=PATIENCE,
-        max_duration=MAX_DURATION,
+        name=None
+        # warmup_iterations_percentage=WARMUP_ITERATIONS_PERCENTAGE,
+        # total_iterations=TRAINING_ITERATIONS,
+        # mode="max",
+        # patience=PATIENCE,
+        # max_duration=MAX_DURATION,
     )
 
     # W&B Logging
