@@ -86,7 +86,8 @@ LEARNING_RATE=2e-4
 WEIGHT_DECAY=1e-2
 GRAD_CLIP=1.0
 ACCUMULATE_GRAD_STEPS=5
-PATIENCE = 10 if FEATURES_SCALE*DOWNSCALE_BLOCK < 448 else 30
+# PATIENCE = 10 if FEATURES_SCALE*DOWNSCALE_BLOCK < 448 else 30
+PATIENCE = 0
 MAX_DURATION = datetime.timedelta(hours=9, minutes=30)
 
 
@@ -174,14 +175,14 @@ def get_config() -> ExperimentConfig:
     )
 # todo
     # Scheduler
-    # config.scheduler = SchedulerConfig(
-    #     name="cosine",
-    #     warmup_iterations_percentage=WARMUP_ITERATIONS_PERCENTAGE,
-    #     total_iterations=TRAINING_ITERATIONS,
-    #     mode="max",
-    #     patience=PATIENCE,
-    #     max_duration=MAX_DURATION,
-    # )
+    config.scheduler = SchedulerConfig(
+        name="cosine",
+        warmup_iterations_percentage=WARMUP_ITERATIONS_PERCENTAGE,
+        total_iterations=TRAINING_ITERATIONS,
+        mode="max",
+        patience=PATIENCE,
+        max_duration=MAX_DURATION,
+    )
 
     # W&B Logging
     config.wandb = WandbConfig(
