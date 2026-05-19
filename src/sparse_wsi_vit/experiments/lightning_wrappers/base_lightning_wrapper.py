@@ -247,13 +247,6 @@ def construct_scheduler(
             last_epoch=-warmup_iterations,
         )
 
-    elif scheduler_type == "reduce_iters_cosine":
-        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer=optimizer,
-            T_max=total_iterations - warmup_iterations,
-            last_epoch=-1,
-        )
-
     else:
         lr_scheduler = None
         warnings.warn(
