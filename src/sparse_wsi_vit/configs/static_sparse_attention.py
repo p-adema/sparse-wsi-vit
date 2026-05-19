@@ -60,8 +60,7 @@ SPARSE_ATTN="static"
 
 # ─── Shared hyperparameters ──────────────────────────────────────────────────
 BATCH_SIZE=1
-# NUM_WORKERS = 8 if FEATURES_SCALE == 224 else 1
-NUM_WORKERS = 15
+NUM_WORKERS = 8 if FEATURES_SCALE == 224 else 1
 WORKER_PREFETCH=2
 CLASS_WEIGHTS=True
 IN_FEATURES=1280
@@ -167,7 +166,7 @@ def get_config() -> ExperimentConfig:
         iterations=TRAINING_ITERATIONS,
         grad_clip=GRAD_CLIP,
         precision=PRECISION,
-        accumulate_grad_steps=ACCUMULATE_GRAD_STEPS
+        accumulate_grad_steps=ACCUMULATE_GRAD_STEPS,
     )
 
     config.trainer = TrainerConfig(
