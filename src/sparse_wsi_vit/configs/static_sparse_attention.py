@@ -176,7 +176,7 @@ def get_config() -> ExperimentConfig:
 # todo
     # Scheduler
     config.scheduler = SchedulerConfig(
-        name="cosine",
+        name="reduce_iters_cosine",
         warmup_iterations_percentage=WARMUP_ITERATIONS_PERCENTAGE,
         total_iterations=TRAINING_ITERATIONS,
         mode="max",
