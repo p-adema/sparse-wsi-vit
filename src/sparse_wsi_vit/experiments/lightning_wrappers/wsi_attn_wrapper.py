@@ -95,6 +95,13 @@ class WSIAttnWrapper(LightningWrapperBase):
         coords = batch["coords"]
         labels = batch["label"]
 
+        device = next(self.network.parameters()).device
+        inputs = inputs.to(device, non_blocking=True)
+        coords = coords.to(device, non_blocking=True)
+        labels = labels.to(device, non_blocking=True)
+        if "class_weight" in batch:
+            batch["class_weight"] = batch["class_weight"].to(device, non_blocking=True)
+
         torch._dynamo.mark_dynamic(inputs, 1)
         torch._dynamo.mark_dynamic(coords, 1)
 
