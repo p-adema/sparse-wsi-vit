@@ -21,7 +21,7 @@ class WSIAttnWrapper(LightningWrapperBase):
         training_crop_tokens: int | None = None,
         eval_crop_tokens: int | None = None,
         compile_mode: str | None = None,
-        validation_on_cpu: Bool = False
+        validation_on_cpu: bool = False
     ):
         super().__init__(network=network, cfg=cfg)
 
