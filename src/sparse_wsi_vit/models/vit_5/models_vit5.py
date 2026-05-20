@@ -226,12 +226,12 @@ class Block(nn.Module):
                 init_values * torch.ones((dim)), requires_grad=True
             )
 
-    def forward(self, x, coords=None):
+    def forward(self, x, coords=None, **kwargs):
         if self.layer_scale:
-            x = x + self.drop_path(self.gamma_1 * self.attn(self.norm1(x), coords))
+            x = x + self.drop_path(self.gamma_1 * self.attn(self.norm1(x), coords, **kwargs))
             x = x + self.drop_path(self.gamma_2 * self.mlp(self.norm2(x)))
         else:
-            x = x + self.drop_path(self.attn(self.norm1(x), coords))
+            x = x + self.drop_path(self.attn(self.norm1(x), coords, **kwargs))
             x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
 
