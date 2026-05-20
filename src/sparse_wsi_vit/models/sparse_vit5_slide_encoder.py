@@ -14,6 +14,7 @@ from torch.utils.checkpoint import checkpoint
 from sparse_wsi_vit.models.vit_5.models_vit5 import Block, RMSNorm
 from sparse_wsi_vit.models.static_sparse_attention import (
     StaticSparseAttentionAdapter,
+    build_block_mask,
     hilbert_sort,
 )
 
@@ -21,10 +22,10 @@ from sparse_wsi_vit.models.static_sparse_attention import (
 _SPARSE_ATTN_TYPES = ("static")
 
 
-def _block_attn_half(block: Block, x: Tensor, coords: Tensor | None) -> Tensor:
+def _block_attn_half(block: Block, x: Tensor, coords: Tensor | None, block_mask=None) -> Tensor:
     if block.layer_scale:
-        return x + block.drop_path(block.gamma_1 * block.attn(block.norm1(x), coords))
-    return x + block.drop_path(block.attn(block.norm1(x), coords))
+        return x + block.drop_path(block.gamma_1 * block.attn(block.norm1(x), coords, block_mask=block_mask))
+    return x + block.drop_path(block.attn(block.norm1(x), coords, block_mask=block_mask))
 
 
 def _block_mlp_half(block: Block, x: Tensor) -> Tensor:
@@ -194,14 +195,26 @@ class SparseViT5SlideEncoder(nn.Module):
         cls = self.cls_tokens.expand(batch_size, -1, -1)  # (batch_size, num_cls, embed_dim)
         x = torch.cat([cls, x], dim=1)                     # (batch_size, num_cls + patch_len, embed_dim)
 
+        # Build the BlockMask once, shared across all layers.
+        attn_module = self.blocks[0].attn.attn
+        block_mask = build_block_mask(
+            seq_len=x.shape[1],
+            num_cls=self.num_cls,
+            chunk_size=attn_module.chunk_size,
+            window_size=attn_module.window_size,
+            flex_block_size=attn_module.flex_block_size,
+            device=x.device,
+            mask_mod=attn_module.make_mask_mod(),
+        )
+
         for block in self.blocks:
             if self.gradient_checkpointing and self.training:
                 attn_fn = partial(_block_attn_half, block)
                 mlp_fn = partial(_block_mlp_half, block)
-                x = checkpoint(attn_fn, x, coords, use_reentrant=False)
+                x = checkpoint(attn_fn, x, coords, block_mask, use_reentrant=False)
                 x = checkpoint(mlp_fn, x, use_reentrant=False)
             else:
-                x = block(x, coords)
+                x = block(x, coords, block_mask=block_mask)
 
         x = self.norm(x)
 
