@@ -75,7 +75,7 @@ class WSIAttnWrapper(LightningWrapperBase):
             distances, crop_tokens, dim=-1, largest=False, sorted=False
         ).indices
         batch["coords"] = batch["coords"].gather(1, closest.unsqueeze(-1).expand(-1, -1, 2))
-        batch["input"] = batch["input"].gather(1, closest.unsqueeze(-1).expand_as(batch["input"]))
+        batch["input"] = batch["input"].gather(1, closest.unsqueeze(-1).expand(-1, -1, batch["input"].size(-1)))
 
     def _step(
         self,
@@ -248,7 +248,12 @@ class WSIAttnWrapper(LightningWrapperBase):
         self.val_precision.update(preds_m, labels_m)
         self.val_recall.update(preds_m, labels_m)
         self.val_f1.update(preds_m, labels_m)
-        self.val_auc.update(preds_m, labels_m)
+        logits_for_auc = output_dict["logits"].squeeze(1).to(metric_device)
+        if not self.multiclass and self.use_bce_loss:
+            auc_scores = torch.sigmoid(logits_for_auc)
+        else:
+            auc_scores = logits_for_auc
+        self.val_auc.update(auc_scores, labels_m)
         self.log(
             f"{kind}/loss",
             loss,
