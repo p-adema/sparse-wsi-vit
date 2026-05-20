@@ -4,31 +4,36 @@ Approach C: Native Sparse Attention (NSA) for WSI slide encoding.
 
 # Native Sparse Pytorch + ViT-5 adapter
 import logging
+import math
+from functools import partial  # for RMSNorm
 
+import timm.layers  # for init weights
 import torch
 import torch.nn as nn
-from torch import Tensor
-from torch.utils.checkpoint import checkpoint
 from einops import rearrange
-from functools import partial  # for RMSNorm
-import timm.layers  # for init weights
+from torch import Tensor
+from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+from torch.utils.checkpoint import checkpoint
 
-from torch.nn.attention.flex_attention import flex_attention, create_block_mask
+from sparse_wsi_vit.models.abmil import (
+    ABMIL,
+)  # used instead of CLS for aggregation; can do ablations if time permits
 
 # local stuff
 from sparse_wsi_vit.models.nsa_kernels.flash_topk import FlashTopK
-from sparse_wsi_vit.models.vit_5.rope import VisionRotaryEmbedding
-from sparse_wsi_vit.models.abmil import (ABMIL)  # used instead of CLS for aggregation; can do ablations if time permits
 from sparse_wsi_vit.models.vit_5.models_vit5 import Block, RMSNorm
+from sparse_wsi_vit.models.vit_5.rope import VisionRotaryEmbedding
 
 try:
     from flash_attn import flash_attn_func
 except ImportError:
     logging.warning("FlashAttention not found, git gud scrub")
 
+
 def mean_pooling(x, block_size):
     B, T, H, D = x.shape
     return x.view(B, T // block_size, block_size, H, D).mean(dim=2)
+
 
 class NativeSparseAttention(nn.Module):
     """
@@ -46,9 +51,9 @@ class NativeSparseAttention(nn.Module):
         rope_coord_high: float = 100_000.0,
     ):
         super().__init__()
-        assert (
-            num_q_heads % (num_kv_heads * 16) == 0
-        ), "NSA needs HQ to be a multiple of 16 * HKV"
+        assert num_q_heads % (num_kv_heads * 16) == 0, (
+            "NSA needs HQ to be a multiple of 16 * HKV"
+        )
 
         self.num_q_heads = num_q_heads
         self.num_kv_heads = num_kv_heads
@@ -82,8 +87,10 @@ class NativeSparseAttention(nn.Module):
         self.get_blocks = FlashTopK(
             head_dim=self.head_dim,
             num_head=num_q_heads,
-            top_k=block_counts, # !!! need GQA inflation
-            is_causal=False
+            top_k=block_counts,  # !!! need GQA inflation
+            is_causal=False,
+            softmax_scale=1 / math.sqrt(self.head_dim),  # standard scale
+            m_block_size=64,  # temp for testing, can remove on A100/H100
         )
 
     def _create_wsi_block_mask(self, block_indices, q_len, kv_len):
@@ -91,15 +98,21 @@ class NativeSparseAttention(nn.Module):
         block_size = self.block_size
 
         def local_or_sparse_mask(b, h, q_idx, kv_idx):
-            q_blk = q_idx // block_size # macro grid
+            q_blk = q_idx // block_size  # macro grid
             kv_blk = kv_idx // block_size
 
-            is_local = (q_blk == kv_blk)  # for local attention
-            selected = torch.any(block_indices[b,h,q_blk] == kv_blk) # for block sparse
+            is_local = q_blk == kv_blk  # for local attention
+            selected = torch.any(
+                block_indices[b, h, q_blk] == kv_blk
+            )  # for block sparse
 
-            return is_local | selected # either is ok; note that we treat it the same here (joint softmax so we should maybe try separating later)
+            return (
+                is_local | selected
+            )  # either is ok; note that we treat it the same here (joint softmax so we should maybe try separating later)
 
-        return create_block_mask(local_or_sparse_mask, B=B, H=H, Q_LEN=q_len, KV_LEN=kv_len)
+        return create_block_mask(
+            local_or_sparse_mask, B=B, H=H, Q_LEN=q_len, KV_LEN=kv_len
+        )
 
     def forward(
         self, x: Tensor, coords: Tensor | None = None, cu_seqlens: Tensor | None = None
@@ -114,7 +127,7 @@ class NativeSparseAttention(nn.Module):
         # this left commented out to emphasize we dont do this anymore
         # instead:
         gates = rearrange(self.g_proj(x), "... (h d) -> ... h d", d=2)
-        g_cmp, g_slc = gates.sigmoid().unbind(-1) # gated to allow for learnable focus
+        g_cmp, g_slc = gates.sigmoid().unbind(-1)  # gated to allow for learnable focus
 
         # CLS? fuggedaboudit not in my house 😤
         if coords is not None:
@@ -131,11 +144,19 @@ class NativeSparseAttention(nn.Module):
         out_cmp = out_cmp * g_cmp.unsqueeze(-1)
 
         # !!! needed GQA workaround, copies memory tensor 16x
-        k_cmp_timesg = k_cmp.repeat_interleave(self.num_q_heads // self.num_kv_heads, dim=2) if self.num_q_heads > self.num_kv_heads else k_cmp
-        v_cmp_timesg = v_cmp.repeat_interleave(self.num_q_heads // self.num_kv_heads, dim=2) if self.num_q_heads > self.num_kv_heads else v_cmp
+        k_cmp_timesg = (
+            k_cmp.repeat_interleave(self.num_q_heads // self.num_kv_heads, dim=2)
+            if self.num_q_heads > self.num_kv_heads
+            else k_cmp
+        )
+        v_cmp_timesg = (
+            v_cmp.repeat_interleave(self.num_q_heads // self.num_kv_heads, dim=2)
+            if self.num_q_heads > self.num_kv_heads
+            else v_cmp
+        )
 
         _out, block_indices, _, _ = self.get_blocks(q_cmp, k_cmp_timesg, v_cmp_timesg)
-        topk_indices = rearrange(block_indices, 'b s h k -> b h s k')
+        topk_indices = rearrange(block_indices, "b s h k -> b h s k")
 
         sparse_mask = self._create_wsi_block_mask(topk_indices, q_len=T, kv_len=T)
 
@@ -200,7 +221,7 @@ class NSABlock(Block):
             num_kv_heads=num_kv_heads,
             block_size=block_size,
             block_counts=block_counts,
-            rope_coord_high=rope_coord_high
+            rope_coord_high=rope_coord_high,
         )
         super().__init__(
             dim=dim, num_heads=num_heads, Attention_block=nsa_wrapped_attn, **kwargs

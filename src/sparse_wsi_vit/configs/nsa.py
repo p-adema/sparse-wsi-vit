@@ -19,16 +19,18 @@ from sparse_wsi_vit.experiments.default_cfg import (
 from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
 
 from sparse_wsi_vit.models.nsa import NSAViTSlideEncoder
-from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import WSIAttnWrapper
+from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import (
+    WSIAttnWrapper,
+)
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 
 PIN_MEMORY = True
 
 # ─── Data Details ──────────────────────────────────────────────
-CSV_TRAIN_FOLD = Path.home() / "splits/camelyon/full"
+CSV_TRAIN_FOLD = "../splits/camelyon/full"
 TARGET_NAME = "is_tumor"
 TARGET_OPTIONS = ("normal", "tumor")
-FEATURES_DIR = Path.home() / "camelyon-emb/"
+FEATURES_DIR = "../camelyon-emb/"
 DOWNSCALE_BLOCK = 1
 FEATURES_NAME = "cls"  # "patches" or "cls"
 FEATURES_SCALE = 224

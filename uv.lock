@@ -495,6 +495,16 @@ wheels = [
 ]
 
 [[package]]
+name = "flash-attn"
+version = "2.8.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "einops" },
+    { name = "torch" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3b/b2/8d76c41ad7974ee264754709c22963447f7f8134613fd9ce80984ed0dab7/flash_attn-2.8.3.tar.gz", hash = "sha256:1e71dd64a9e0280e0447b8a0c2541bad4bf6ac65bdeaa2f90e51a9e57de0370d", size = 8447812, upload-time = "2025-08-15T08:28:12.911Z" }
+
+[[package]]
 name = "fonttools"
 version = "4.62.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1483,6 +1493,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/70/06/44d3a19b0cac377c6194f5ba3f06dc1fadeaa74dacf3ebbe157aa02c013a/nvidia_cutlass_dsl-4.5.1-py3-none-any.whl", hash = "sha256:b8459948936ac935ad146f4abc78726e0f07012de5dffe39b0845c8c477a6c08", size = 10178, upload-time = "2026-05-15T14:37:31.319Z" },
 ]
 
+[package.optional-dependencies]
+cu13 = [
+    { name = "nvidia-cutlass-dsl-libs-cu13" },
+]
+
 [[package]]
 name = "nvidia-cutlass-dsl-libs-base"
 version = "4.5.1"
@@ -1495,6 +1510,21 @@ dependencies = [
 wheels = [
     { url = "https://files.pythonhosted.org/packages/17/22/16bfee73a53195ca06a738d92aefd740f5af5eef32be8aec4f5c18a8e1d2/nvidia_cutlass_dsl_libs_base-4.5.1-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:e9825fc281b72b2b10e5a397c211ce0f16e6df55178230da4b3f141aeffbe6d6", size = 75636465, upload-time = "2026-05-15T14:45:29.803Z" },
     { url = "https://files.pythonhosted.org/packages/d6/ba/f8c3f7db3de25be75e13527cd88a3019f0036370c9769ceefd1cf8165c76/nvidia_cutlass_dsl_libs_base-4.5.1-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:527cb8b4025b34b39c11ec6d7bfe065c82f4051aafec9d038d43dcaaeb853c22", size = 74510998, upload-time = "2026-05-15T14:44:29.643Z" },
+]
+
+[[package]]
+name = "nvidia-cutlass-dsl-libs-cu13"
+version = "4.5.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cuda-python" },
+    { name = "numpy" },
+    { name = "nvidia-cutlass-dsl-libs-base" },
+    { name = "typing-extensions" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/42/4c/45deded46e9a173e3137d0ab072a25bc9e906fa8c562d1c346891937c839/nvidia_cutlass_dsl_libs_cu13-4.5.1-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:30f210872ff34a3438f02bafc73e49d76f26dd370599cc36cc6cab44176a249e", size = 79083528, upload-time = "2026-05-15T14:38:54.017Z" },
+    { url = "https://files.pythonhosted.org/packages/e0/64/9d177e852192797bab0ecc7e9455a9c512c2c2b4b472da112cfeece00500/nvidia_cutlass_dsl_libs_cu13-4.5.1-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:f3299506a36be561d77e23fe15dcf9cdb9535933e41e29fdba29238deb3cab4f", size = 78753726, upload-time = "2026-05-15T14:41:13.728Z" },
 ]
 
 [[package]]
@@ -2267,11 +2297,12 @@ dependencies = [
     { name = "cuda-python" },
     { name = "einops" },
     { name = "einops-exts" },
+    { name = "flash-attn" },
     { name = "h5py" },
     { name = "jupyter" },
     { name = "matplotlib" },
     { name = "numpy" },
-    { name = "nvidia-cutlass-dsl" },
+    { name = "nvidia-cutlass-dsl", extra = ["cu13"] },
     { name = "nystrom-attention" },
     { name = "omegaconf" },
     { name = "openslide-bin" },
@@ -2298,11 +2329,12 @@ requires-dist = [
     { name = "cuda-python", specifier = ">=13.2.0" },
     { name = "einops", specifier = ">=0.8.2" },
     { name = "einops-exts", specifier = ">=0.0.4" },
+    { name = "flash-attn" },
     { name = "h5py", specifier = ">=3.16.0" },
     { name = "jupyter", specifier = ">=1.1.1" },
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "numpy", specifier = ">=2.4.4" },
-    { name = "nvidia-cutlass-dsl", extras = ["cu12"], specifier = ">=4.5.1" },
+    { name = "nvidia-cutlass-dsl", extras = ["cu13"], specifier = ">=4.5.1" },
     { name = "nystrom-attention", specifier = ">=0.0.13" },
     { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "openslide-bin", specifier = ">=4.0.0.13" },

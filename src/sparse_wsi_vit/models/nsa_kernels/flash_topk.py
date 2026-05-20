@@ -1,5 +1,5 @@
 # Requires: nvidia-cutlass-dsl
-
+import functools
 import math
 import time
 from collections.abc import Callable
@@ -984,14 +984,14 @@ class FlashAttnTopKKernel:
         # ///////////////////////////////////////////////////////////////////////////////
         # top-k calculation
         # ///////////////////////////////////////////////////////////////////////////////
-        for m in cutlass.range_constexpr(cute.size(acc_S, 1)):
+        for m in cutlass.range_constexpr(cute.size(acc_S, mode=[1])):
             for m_atom in cutlass.range_constexpr(2):
                 slice_S = acc_S[(None, m_atom), m, None]
                 rVals = cute.make_rmem_tensor(cute.size(slice_S), cutlass.Float32)
                 rVals.store(slice_S.load())
 
                 rIdx = cute.make_rmem_tensor(cute.size(slice_S), cutlass.Int32)
-                for n in cutlass.range_constexpr(cute.size(acc_S, 2)):
+                for n in cutlass.range_constexpr(cute.size(acc_S, mode=[2])):
                     block_offset = basic_params.n_block * self._n_block_size
                     thread_offset = (cute.arch.thread_idx()[0] % 4) * 2
                     rIdx[2 * n] = block_offset + thread_offset + n * 8
@@ -1368,7 +1368,7 @@ class FlashTopK(torch.nn.Module):
         log_smem: bool = False,
     ):
         super().__init__()
-        func = self._compile(
+        flash_topk = self._compile(
             head_dim,
             num_head,
             is_causal,
@@ -1379,34 +1379,97 @@ class FlashTopK(torch.nn.Module):
             softmax_scale,
             log_smem,
         )
-        flash_topk = self._wrap(
-            func,
-            head_dim,
-            is_causal,
-            m_block_size,
-            n_block_size,
-            num_head,
-            num_threads,
-            top_k,
-            softmax_scale,
-        )
 
         self.flash_topk = flash_topk
 
-    def _wrap(
-        self,
-        func,
+    def forward(self, q, k, v):
+        return self.flash_topk(q, k, v)
+
+    @staticmethod
+    def _convert(tns: torch.Tensor, dim: int, width: int) -> cute.Tensor:
+        return (
+            from_dlpack(tns.detach(), assumed_align=16)
+            .mark_layout_dynamic(leading_dim=dim)
+            .mark_compact_shape_dynamic(
+                mode=dim,
+                stride_order=tns.dim_order(),
+                divisibility=(128 // width),
+            )
+        )
+
+    @staticmethod
+    @functools.cache
+    def _compile(
         head_dim: int,
+        num_head: int,
         is_causal: bool,
         m_block_size: int,
         n_block_size: int,
-        num_head: int,
         num_threads: int,
         top_k: int,
         softmax_scale: float,
-    ) -> tuple[
-        Callable[..., tuple[Tensor, Tensor, Tensor]], tuple[Tensor, Tensor, Tensor]
-    ]:
+        log_smem: bool,
+    ):
+        kernel = FlashAttnTopKKernel(
+            head_dim,
+            m_block_size,
+            n_block_size,
+            num_threads,
+            is_causal,
+            top_k,
+            log_smem,
+        )
+
+        def create_tensor() -> cute.Tensor:
+            torch_tensor = (
+                torch.empty((1, 4096, num_head, head_dim), dtype=torch.int32)
+                .random_(-2, 2)
+                .to(torch.bfloat16)
+                .cuda()
+            )
+            return FlashTopK._convert(torch_tensor, 3, 2), torch_tensor
+
+        def create_indices(dtype):
+            shape = (
+                1,
+                math.ceil(4096 / m_block_size),
+                num_head,
+                top_k,
+                m_block_size,
+            )
+            torch_tensor = torch.full(shape, -1, dtype=dtype).movedim(4, 3).cuda()
+            cute_tensor = FlashTopK._convert(torch_tensor, 3, 4)
+            return cute_tensor, torch_tensor
+
+        def create_lse():
+            torch_tensor = torch.full(
+                (1, head_dim, 4096), -1, dtype=torch.float32
+            ).cuda()
+            cute_tensor = FlashTopK._convert(torch_tensor, 2, 128)  # ragged last
+            return cute_tensor, torch_tensor
+
+        torch.cuda.manual_seed(0)
+
+        q, _q_torch = create_tensor()
+        k, _k_torch = create_tensor()
+        v, _v_torch = create_tensor()
+        o, _o_torch = create_tensor()
+        i, _i_torch = create_indices(torch.int32)
+        t, _t_torch = create_indices(torch.float32)
+        lse, _lse_torch = create_lse()
+
+        torch_stream = torch.cuda.current_stream()
+        stream = cuda.CUstream(torch_stream.cuda_stream)
+        print("COMPILE CALL:")
+        print(f"\t{q.shape=}")
+        print(f"\t{k.shape=}")
+        print(f"\t{v.shape=}")
+        print(f"\t{o.shape=}")
+        print(f"\t{i.shape=}")
+        print(f"\t{t.shape=}")
+        print(f"\t{lse.shape=}")
+        func = cute.compile(kernel, q, k, v, o, i, t, lse, softmax_scale, stream)
+
         @torch.library.custom_op(
             f"wsivit::flash_topk_{head_dim}_{num_head}_"
             f"{m_block_size}_{n_block_size}_{num_threads}_{is_causal}_{top_k}",
@@ -1444,14 +1507,14 @@ class FlashTopK(torch.nn.Module):
             torch_stream = torch.cuda.current_stream()
             stream = cuda.CUstream(torch_stream.cuda_stream)
             func(
-                self._convert(query, 3, 2),
-                self._convert(key, 3, 2),
-                self._convert(value, 3, 2),
-                self._convert(out, 3, 2),
-                self._convert(idx, 3, 4),
-                self._convert(top_val, 3, 4),
-                self._convert(lse, 2, 4),
-                # softmax_scale,
+                FlashTopK._convert(query, 3, 2),
+                FlashTopK._convert(key, 3, 2),
+                FlashTopK._convert(value, 3, 2),
+                FlashTopK._convert(out, 3, 2),
+                FlashTopK._convert(idx, 3, 4),
+                FlashTopK._convert(top_val, 3, 4),
+                FlashTopK._convert(lse, 2, 128),
+                # softmax_scale (constexpr elided),
                 stream,
             )
             idx = idx.movedim(3, 2).reshape(
@@ -1529,85 +1592,6 @@ class FlashTopK(torch.nn.Module):
 
         flash_topk.register_autograd(backward, setup_context=setup_context)
         return flash_topk
-
-    def forward(self, q, k, v):
-        return self.flash_topk(q, k, v)
-
-    @staticmethod
-    def _convert(tns: torch.Tensor, dim: int, width: int) -> cute.Tensor:
-        return (
-            from_dlpack(tns.detach(), assumed_align=16)
-            .mark_layout_dynamic(leading_dim=dim)
-            .mark_compact_shape_dynamic(
-                mode=dim,
-                stride_order=tns.dim_order(),
-                divisibility=(128 // width),
-            )
-        )
-
-    def _compile(
-        self,
-        head_dim: int,
-        num_head: int,
-        is_causal: bool,
-        m_block_size: int,
-        n_block_size: int,
-        num_threads: int,
-        top_k: int,
-        softmax_scale: float,
-        log_smem: bool,
-    ):
-        kernel = FlashAttnTopKKernel(
-            head_dim,
-            m_block_size,
-            n_block_size,
-            num_threads,
-            is_causal,
-            top_k,
-            log_smem,
-        )
-
-        def create_tensor() -> cute.Tensor:
-            torch_tensor = (
-                torch.empty((1, 4096, num_head, head_dim), dtype=torch.int32)
-                .random_(-2, 2)
-                .to(torch.bfloat16)
-                .cuda()
-            )
-            return self._convert(torch_tensor, 3, 2), torch_tensor
-
-        def create_indices(dtype):
-            shape = (
-                1,
-                math.ceil(4096 / m_block_size),
-                num_head,
-                top_k,
-                m_block_size,
-            )
-            torch_tensor = torch.full(shape, -1, dtype=dtype).movedim(4, 3).cuda()
-            cute_tensor = self._convert(torch_tensor, 3, 4)
-            return cute_tensor, torch_tensor
-
-        def create_lse():
-            torch_tensor = torch.full(
-                (1, head_dim, 4096), -1, dtype=torch.float32
-            ).cuda()
-            cute_tensor = self._convert(torch_tensor, 2, 4)
-            return cute_tensor, torch_tensor
-
-        torch.cuda.manual_seed(0)
-
-        q, _q_torch = create_tensor()
-        k, _k_torch = create_tensor()
-        v, _v_torch = create_tensor()
-        o, _o_torch = create_tensor()
-        i, _i_torch = create_indices(torch.int32)
-        t, _t_torch = create_indices(torch.float32)
-        lse, _lse_torch = create_lse()
-
-        torch_stream = torch.cuda.current_stream()
-        stream = cuda.CUstream(torch_stream.cuda_stream)
-        return cute.compile(kernel, q, k, v, o, i, t, lse, softmax_scale, stream)
 
 
 def example():
