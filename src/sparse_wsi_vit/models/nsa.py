@@ -90,15 +90,9 @@ class NativeSparseAttention(nn.Module):
 
         @torch.compiler.disable(reason="autotune crashes")
         def _flex(q, k, v, **kwargs):
-            torch._dynamo.mark_dynamic(
-                q, 2, min=128, max=16_000_000, hint_override=200_000
-            )
-            torch._dynamo.mark_dynamic(
-                k, 2, min=128, max=16_000_000, hint_override=200_000
-            )
-            torch._dynamo.mark_dynamic(
-                v, 2, min=128, max=16_000_000, hint_override=200_000
-            )
+            torch._dynamo.mark_dynamic(q, 2)
+            torch._dynamo.mark_dynamic(k, 2)
+            torch._dynamo.mark_dynamic(v, 2)
             return flex(q, k, v, **kwargs)
 
         self.flex_attn = _flex
