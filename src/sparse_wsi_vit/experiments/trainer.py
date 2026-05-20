@@ -171,5 +171,6 @@ def construct_trainer(
         # Logging frequency
         log_every_n_steps=10,
         enable_progress_bar=True,
+        num_sanity_val_steps=cfg.trainer.num_sanity_val_steps,
     )
     return trainer, checkpoint_callback

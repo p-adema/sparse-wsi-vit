@@ -35,6 +35,8 @@ class TrainerConfig:
     # Run through all validation batches every epoch by default.
     limit_val_batches: Union[int, float] = 1.0
 
+    num_sanity_val_steps : Optional[int] =  None
+
 
 @dataclass
 class SchedulerConfig:

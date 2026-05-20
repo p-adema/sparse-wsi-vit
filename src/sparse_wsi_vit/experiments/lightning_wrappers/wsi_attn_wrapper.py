@@ -21,8 +21,11 @@ class WSIAttnWrapper(LightningWrapperBase):
         training_crop_tokens: int | None = None,
         eval_crop_tokens: int | None = None,
         compile_mode: str | None = None,
+        validation_on_cpu: bool = False
     ):
         super().__init__(network=network, cfg=cfg)
+
+        self.validation_on_cpu = validation_on_cpu
 
         self.multiclass = hasattr(network, "out_features") and network.out_features > 1
 
@@ -92,6 +95,11 @@ class WSIAttnWrapper(LightningWrapperBase):
         coords = batch["coords"]
         labels = batch["label"]
 
+        device = next(self.network.parameters()).device
+        inputs = inputs.to(device, non_blocking=True)
+        coords = coords.to(device, non_blocking=True)
+        labels = labels.to(device, non_blocking=True)
+
         torch._dynamo.mark_dynamic(inputs, 1)
         torch._dynamo.mark_dynamic(coords, 1)
 
@@ -108,7 +116,9 @@ class WSIAttnWrapper(LightningWrapperBase):
         if "class_weight" in batch:
             loss *= batch["class_weight"]
 
-        accuracy_calculator.update(preds, labels)
+        metric_device = getattr(accuracy_calculator, "device", next(self.parameters()).device)
+        accuracy_calculator.update(preds.to(metric_device), labels.to(metric_device))
+
         return loss, preds, output_dict
 
     def training_step(
@@ -198,9 +208,31 @@ class WSIAttnWrapper(LightningWrapperBase):
         gc.collect()
         torch.cuda.empty_cache()
         self._maybe_crop_batch(batch, self.eval_crop_tokens)
+
         t0 = time.perf_counter()
-        with torch.inference_mode():
-            loss, preds, output_dict = self._step(batch, self.val_acc)
+        used_cpu = False
+
+        if self.validation_on_cpu:
+            try:
+                # Try GPU first
+                self.network.to(self.device)  # usually cuda
+                with torch.inference_mode():
+                    loss, preds, output_dict = self._step(batch, self.val_acc)
+            except RuntimeError as e:
+                # Fallback to CPU only on CUDA OOM
+                if "out of memory" not in str(e):
+                    raise
+                torch.cuda.empty_cache()
+                self.network.to("cpu")
+                with torch.inference_mode():
+                    loss, preds, output_dict = self._step(batch, self.val_acc)
+                used_cpu = True
+                # Move back to GPU for subsequent training/val
+                self.network.to(self.device)
+        else:
+            with torch.inference_mode():
+                loss, preds, output_dict = self._step(batch, self.val_acc)
+
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         step_ms = (time.perf_counter() - t0) * 1000
@@ -208,10 +240,15 @@ class WSIAttnWrapper(LightningWrapperBase):
         labels = batch["label"]
         batch_size = batch["input"].size(0)
         num_patches = batch["input"].size(1)
-        self.val_precision.update(preds, labels)
-        self.val_recall.update(preds, labels)
-        self.val_f1.update(preds, labels)
-        self.val_auc.update(preds, labels)
+
+        metric_device = self.device
+        preds_m = preds.to(metric_device)
+        labels_m = labels.to(metric_device)
+
+        self.val_precision.update(preds_m, labels_m)
+        self.val_recall.update(preds_m, labels_m)
+        self.val_f1.update(preds_m, labels_m)
+        self.val_auc.update(preds_m, labels_m)
         self.log(
             f"{kind}/loss",
             loss,
@@ -242,6 +279,14 @@ class WSIAttnWrapper(LightningWrapperBase):
                 batch_size=batch_size,
             )
         return loss
+
+    def on_validation_start(self) -> None:
+        if self.validation_on_cpu:
+            self.network.to("cpu")
+
+    def on_validation_end(self) -> None:
+        if self.validation_on_cpu:
+            self.network.to("cuda")
 
     def on_validation_epoch_end(self) -> None:
         """Log epoch-level validation accuracy, precision, recall, F1, and AUC."""
