@@ -16,6 +16,7 @@ from sparse_wsi_vit.experiments.default_cfg import (
     SchedulerConfig,
     TrainConfig,
     WandbConfig,
+    TrainerConfig,
 )
 from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
 
@@ -24,7 +25,8 @@ from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import WSIAt
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 from sparse_wsi_vit.experiments.callbacks import AttentionMapCallback
 from sparse_wsi_vit.models.coord_logger import CoordLogger
-PIN_MEMORY = True
+# PIN_MEMORY = True
+PIN_MEMORY = False
 
 # ─── Data Details ──────────────────────────────────────────────
 CSV_TRAIN_FOLD = Path("../splits/camelyon/full")
@@ -59,8 +61,7 @@ SPARSE_ATTN="static"
 
 # ─── Shared hyperparameters ──────────────────────────────────────────────────
 BATCH_SIZE=1
-# NUM_WORKERS = 8 if FEATURES_SCALE == 224 else 1
-NUM_WORKERS = 15
+NUM_WORKERS = 8 if FEATURES_SCALE == 224 else 1
 WORKER_PREFETCH=2
 CLASS_WEIGHTS=True
 IN_FEATURES=1280
@@ -150,6 +151,7 @@ def get_config() -> ExperimentConfig:
         training_crop_tokens=None,
         eval_crop_tokens=None,
         compile_mode="max-autotune-no-cudagraphs",
+        validation_on_cpu=True
     )
 
 
@@ -168,6 +170,11 @@ def get_config() -> ExperimentConfig:
         accumulate_grad_steps=ACCUMULATE_GRAD_STEPS,
     )
 
+    # config.trainer = TrainerConfig(
+    #     num_sanity_val_steps=0,
+    #     val_check_interval=1.0
+    # )
+# todo
     # Scheduler
     config.scheduler = SchedulerConfig(
         name="cosine",
