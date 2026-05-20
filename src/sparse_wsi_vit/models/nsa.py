@@ -10,17 +10,25 @@ import torch.nn as nn
 from torch import Tensor
 from torch.utils.checkpoint import checkpoint
 from einops import rearrange
-
-from sparse_wsi_vit.models.nsa_kernels.parallel import parallel_nsa
-from sparse_wsi_vit.models.vit_5.rope import VisionRotaryEmbedding
-from sparse_wsi_vit.models.abmil import (
-    ABMIL,
-)  # used instead of CLS for aggregation; can do ablations if time permits
 from functools import partial  # for RMSNorm
-from sparse_wsi_vit.models.vit_5.models_vit5 import Block, RMSNorm
-
 import timm.layers  # for init weights
 
+from torch.nn.attention.flex_attention import flex_attention, create_block_mask
+
+# local stuff
+from sparse_wsi_vit.models.nsa_kernels.flash_topk import FlashTopK
+from sparse_wsi_vit.models.vit_5.rope import VisionRotaryEmbedding
+from sparse_wsi_vit.models.abmil import (ABMIL)  # used instead of CLS for aggregation; can do ablations if time permits
+from sparse_wsi_vit.models.vit_5.models_vit5 import Block, RMSNorm
+
+try:
+    from flash_attn import flash_attn_func
+except ImportError:
+    logging.warning("FlashAttention not found, git gud scrub")
+
+def mean_pooling(x, block_size):
+    B, T, H, D = x.shape
+    return x.view(B, T // block_size, block_size, H, D).mean(dim=2)
 
 class NativeSparseAttention(nn.Module):
     """
@@ -50,7 +58,7 @@ class NativeSparseAttention(nn.Module):
         assert self.head_dim in [
             64,
             128,
-        ], f"Triton kernels expect head_dim 64 or 128, got {self.head_dim}"
+        ], f"Kernels enjoy head_dim 64 or 128, got {self.head_dim}"
 
         self.block_size = block_size
         self.block_counts = block_counts
@@ -60,50 +68,86 @@ class NativeSparseAttention(nn.Module):
         self.v_proj = nn.Linear(d_model, num_kv_heads * self.head_dim, bias=False)
 
         self.rope = VisionRotaryEmbedding(
-            dim=self.head_dim // 2, # need to review why
+            dim=self.head_dim // 2,
             freqs_for="pixel",  # hmm
             coord_high=rope_coord_high,
             dynamic=True,
         )
 
         # gates for dynamic block selection
-        self.g_proj = nn.Linear(d_model, num_q_heads * 3, bias=False)
+        self.g_proj = nn.Linear(d_model, num_q_heads * 2, bias=False)
+        # !!! for now just two gates for global and sparse branches
         self.out_proj = nn.Linear(num_q_heads * self.head_dim, d_model, bias=False)
+
+        self.get_blocks = FlashTopK(
+            head_dim=self.head_dim,
+            num_head=num_q_heads,
+            top_k=block_counts, # !!! need GQA inflation
+            is_causal=False
+        )
+
+    def _create_wsi_block_mask(self, block_indices, q_len, kv_len):
+        B, H, _, _ = block_indices.shape
+        block_size = self.block_size
+
+        def local_or_sparse_mask(b, h, q_idx, kv_idx):
+            q_blk = q_idx // block_size # macro grid
+            kv_blk = kv_idx // block_size
+
+            is_local = (q_blk == kv_blk)  # for local attention
+            selected = torch.any(block_indices[b,h,q_blk] == kv_blk) # for block sparse
+
+            return is_local | selected # either is ok; note that we treat it the same here (joint softmax so we should maybe try separating later)
+
+        return create_block_mask(local_or_sparse_mask, B=B, H=H, Q_LEN=q_len, KV_LEN=kv_len)
 
     def forward(
         self, x: Tensor, coords: Tensor | None = None, cu_seqlens: Tensor | None = None
     ) -> Tensor:
         B, T, _ = x.shape
 
-        if cu_seqlens is None:
-            if B == 1:
-                cu_seqlens = torch.tensor([0, T], dtype=torch.int32, device=x.device)
-            else:
-                raise ValueError("Code doesn't support B > 1 yet")
-
         q = rearrange(self.q_proj(x), "... (h d) -> ... h d", h=self.num_q_heads)
         k = rearrange(self.k_proj(x), "... (h d) -> ... h d", h=self.num_kv_heads)
         v = rearrange(self.v_proj(x), "... (h d) -> ... h d", h=self.num_kv_heads)
-        g = rearrange(self.g_proj(x), "... (h d) -> ... h d", d=3)
-        g_cmp, g_slc, g_swa = g.sigmoid().unbind(-1)
-        # use sigmoid here, mosaic used softmax which is kinda interesting
+        # g = rearrange(self.g_proj(x), "... (h d) -> ... h d", d=3)
+        # g_cmp, g_slc, g_swa = g.sigmoid().unbind(-1)
+        # this left commented out to emphasize we dont do this anymore
+        # instead:
+        gates = rearrange(self.g_proj(x), "... (h d) -> ... h d", d=2)
+        g_cmp, g_slc = gates.sigmoid().unbind(-1) # gated to allow for learnable focus
 
         # CLS? fuggedaboudit not in my house 😤
         if coords is not None:
             q = self.rope(q, coords)
             k = self.rope(k, coords)
 
-        out = parallel_nsa(
-            q=q,
-            k=k,
-            v=v,
-            g_cmp=g_cmp,
-            g_slc=g_slc,
-            g_swa=g_swa,
-            block_size=self.block_size,
-            block_counts=self.block_counts,
-            cu_seqlens=cu_seqlens,
-        )
+        # get blocks
+        q_cmp = mean_pooling(q, self.block_size)
+        k_cmp = mean_pooling(k, self.block_size)
+        v_cmp = mean_pooling(v, self.block_size)
+
+        # global compressed attention (dense FA2)
+        out_cmp = flash_attn_func(q, k_cmp, v_cmp, causal=False)
+        out_cmp = out_cmp * g_cmp.unsqueeze(-1)
+
+        # !!! needed GQA workaround, copies memory tensor 16x
+        k_cmp_timesg = k_cmp.repeat_interleave(self.num_q_heads // self.num_kv_heads, dim=2) if self.num_q_heads > self.num_kv_heads else k_cmp
+        v_cmp_timesg = v_cmp.repeat_interleave(self.num_q_heads // self.num_kv_heads, dim=2) if self.num_q_heads > self.num_kv_heads else v_cmp
+
+        _out, block_indices, _, _ = self.get_blocks(q_cmp, k_cmp_timesg, v_cmp_timesg)
+        topk_indices = rearrange(block_indices, 'b s h k -> b h s k')
+
+        sparse_mask = self._create_wsi_block_mask(topk_indices, q_len=T, kv_len=T)
+
+        # [B, H, T, D] -> [B, T, H, D] flex needs
+        q_flex = q.transpose(1, 2)
+        k_flex = k.transpose(1, 2)
+        v_flex = v.transpose(1, 2)
+
+        out_sparse_flex = flex_attention(q_flex, k_flex, v_flex, block_mask=sparse_mask)
+        out_sparse = out_sparse_flex.transpose(1, 2) * g_slc.unsqueeze(-1)
+
+        out = out_cmp + out_sparse
 
         return self.out_proj(out.reshape(B, T, -1))
 
@@ -275,6 +319,7 @@ class NSAViTSlideEncoder(nn.Module):
         x: torch.Tensor,
         coords: torch.Tensor | None = None,
         cu_seqlens: torch.Tensor | None = None,
+        true_lengths: torch.Tensor | None = None,
     ) -> dict:
         h = self.input_proj(x)
 
@@ -284,6 +329,6 @@ class NSAViTSlideEncoder(nn.Module):
             else:
                 h = layer(h, coords=coords, cu_seqlens=cu_seqlens)
 
-        h = self.norm(h) # is this good? not 100% sure
+        h = self.norm(h)
         # ABMIL returns a dict containing {"logits": ..., "attention": ...}
-        return self.pooler(h, return_attention=True)
+        return self.pooler(h, lengths=true_lengths, return_attention=True)

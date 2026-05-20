@@ -33,7 +33,9 @@ dependencies = [
     "ty>=0.0.30",
     #    "vit-5",
     "wandb>=0.25.1",
-    "nystrom-attention>=0.0.13"
+    "nystrom-attention>=0.0.13",
+    "nvidia-cutlass-dsl[cu12]>=4.5.1",
+    "cuda-python>=13.2.0",
 ]
 
 [build-system]

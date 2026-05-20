@@ -42,7 +42,10 @@ class ABMIL(nn.Module):
             nn.Linear(in_features // 2, out_features),
         )
 
-    def forward(self, x: torch.Tensor, return_attention: bool = False) -> dict:
+    def forward(self,
+                x: torch.Tensor,
+                lengths: torch.Tensor | None = None,
+                return_attention: bool = False) -> dict:
         """Run a forward pass over a feature bag.
 
         Args:
@@ -81,6 +84,13 @@ class ABMIL(nn.Module):
         a_u = self.attention_u(x)  # (B, N, hidden_dim)
         a = self.attention_weights(a_v * a_u)  # (B, N, num_branches)
         a = torch.transpose(a, 1, 2)  # (B, num_branches, N)
+
+        # need this masking for NSA; doesn't affect other functionality
+        if lengths is not None:
+            indices = torch.arange(N, device=x.device)
+            mask = (indices.unsqueeze(0) < lengths.unsqueeze(1)).unsqueeze(1)
+            a = a.masked_fill(~mask, float("-inf"))
+
         a = F.softmax(a, dim=2)  # (B, num_branches, N)
 
         # Aggregate
