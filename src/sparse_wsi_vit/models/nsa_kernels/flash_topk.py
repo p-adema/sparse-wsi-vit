@@ -1,4 +1,5 @@
 # Requires: nvidia-cutlass-dsl
+from pathlib import Path
 import functools
 import math
 import time
@@ -850,8 +851,9 @@ class FlashAttnTopKKernel:
                 (self._top_k,),
                 (0,),
             )
-            cute.autovec_copy(sIdx[m, None, 0], gT)
-            cute.autovec_copy(sVal[m, None, 0], gA)
+            if m_block * self._m_block_size + m < cute.size(mQ, mode=[1]):
+                cute.autovec_copy(sIdx[m, None, 0], gT)
+                cute.autovec_copy(sVal[m, None, 0], gA)
 
         gLSE = cute.local_tile(
             mLSE[batch_idx, head_idx, None], (self._m_block_size,), (m_block,)
@@ -861,10 +863,11 @@ class FlashAttnTopKKernel:
             for m in cutlass.range_constexpr(acc_O.shape[1]):
                 for m_atom in cutlass.range_constexpr(acc_O.shape[0][0]):
                     m_pos = (tidx % 32) // 4 + m_atom * 8 + tidx // 32 * 16 + m * 64
-                    gLSE[m_pos] = (
-                        cute.math.log(softmax_params.row_sum[m_atom + m * 2])
-                        + softmax_params.row_max[m_atom + m * 2] * softmax_scale
-                    )
+                    if m_block * self._m_block_size + m_pos < cute.size(mQ, mode=[1]):
+                        gLSE[m_pos] = (
+                            cute.math.log(softmax_params.row_sum[m_atom + m * 2])
+                            + softmax_params.row_max[m_atom + m * 2] * softmax_scale
+                        )
 
     @cute.jit
     def compute_one_n_block(
@@ -987,17 +990,31 @@ class FlashAttnTopKKernel:
         for m in cutlass.range_constexpr(cute.size(acc_S, mode=[1])):
             for m_atom in cutlass.range_constexpr(2):
                 slice_S = acc_S[(None, m_atom), m, None]
-                rVals = cute.make_rmem_tensor(cute.size(slice_S), cutlass.Float32)
-                rVals.store(slice_S.load())
-
                 rIdx = cute.make_rmem_tensor(cute.size(slice_S), cutlass.Int32)
                 for n in cutlass.range_constexpr(cute.size(acc_S, mode=[2])):
                     block_offset = basic_params.n_block * self._n_block_size
                     thread_offset = (cute.arch.thread_idx()[0] % 4) * 2
                     rIdx[2 * n] = block_offset + thread_offset + n * 8
                     rIdx[2 * n + 1] = block_offset + thread_offset + n * 8 + 1
+                # Mask out invalid positions at the end of the sequence.
+                for i in cutlass.range_constexpr(cute.size(slice_S)):
+                    if rIdx[i] >= cute.size(basic_params.mK, mode=[1]):
+                        slice_S[i] = -cutlass.Float32.inf
+
+                rVals = cute.make_rmem_tensor(cute.size(slice_S), cutlass.Float32)
+
+                rVals.store(slice_S.load())
+                # but the compiler seems to alias them then for some reason?
+                # cute.autovec_copy(cute.group_modes(slice_S, 0), rVals)
+                # for i in cutlass.range_constexpr(cute.size(rVals)):
+                #     rVals[i] = slice_S[i] + 0.0
 
                 if is_first_n_block:
+                    # Mask out invalid positions at the end of the sequence.
+                    # for i in cutlass.range_constexpr(cute.size(rVals)):
+                    #     if rIdx[i] >= cute.size(basic_params.mK, mode=[1]):
+                    #         rVals[i] = -cutlass.Float32.inf
+
                     # Sort descending and store
                     self._bitonic_sort(rVals, rIdx)
                     topV = cute.local_tile(rVals, (self._top_k,), (0,)).load()
@@ -1358,7 +1375,7 @@ class FlashTopK(torch.nn.Module):
     def __init__(
         self,
         head_dim: int,
-        num_head: int,
+        num_heads: int,
         m_block_size: int = 128,
         n_block_size: int = 128,
         num_threads: int = 128,
@@ -1370,7 +1387,7 @@ class FlashTopK(torch.nn.Module):
         super().__init__()
         flash_topk = self._compile(
             head_dim,
-            num_head,
+            num_heads,
             is_causal,
             m_block_size,
             n_block_size,
@@ -1410,61 +1427,87 @@ class FlashTopK(torch.nn.Module):
         softmax_scale: float,
         log_smem: bool,
     ):
-        kernel = FlashAttnTopKKernel(
-            head_dim,
-            m_block_size,
-            n_block_size,
-            num_threads,
-            is_causal,
-            top_k,
-            log_smem,
+        cache_key = (
+            f"flash_topk_{head_dim}_{num_head}_{int(softmax_scale * 1000)}"
+            f"_{m_block_size}_{n_block_size}_{num_threads}_{is_causal}_{top_k}"
         )
-
-        def create_tensor() -> cute.Tensor:
-            torch_tensor = (
-                torch.empty((1, 4096, num_head, head_dim), dtype=torch.int32)
-                .random_(-2, 2)
-                .to(torch.bfloat16)
-                .cuda()
-            )
-            return FlashTopK._convert(torch_tensor, 3, 2), torch_tensor
-
-        def create_indices(dtype):
-            shape = (
-                1,
-                math.ceil(4096 / m_block_size),
-                num_head,
-                top_k,
+        cache = (Path.home() / ".cache" / "flash_topk" / cache_key).resolve()
+        if cache.with_suffix(".o").exists():
+            func = cute.runtime.load_module(str(cache.with_suffix(".o"))).func
+            print(f"Loaded compiled kernel at {cache}")
+        else:
+            kernel = FlashAttnTopKKernel(
+                head_dim,
                 m_block_size,
+                n_block_size,
+                num_threads,
+                is_causal,
+                top_k,
+                log_smem,
             )
-            torch_tensor = torch.full(shape, -1, dtype=dtype).movedim(4, 3).cuda()
-            cute_tensor = FlashTopK._convert(torch_tensor, 3, 4)
-            return cute_tensor, torch_tensor
 
-        def create_lse():
-            torch_tensor = torch.full(
-                (1, head_dim, 4096), -1, dtype=torch.float32
-            ).cuda()
-            cute_tensor = FlashTopK._convert(torch_tensor, 2, 128)  # ragged last
-            return cute_tensor, torch_tensor
+            def create_tensor() -> cute.Tensor:
+                torch_tensor = (
+                    torch.empty((1, 4096, num_head, head_dim), dtype=torch.int32)
+                    .random_(-2, 2)
+                    .to(torch.bfloat16)
+                    .cuda()
+                )
+                return FlashTopK._convert(torch_tensor, 3, 2), torch_tensor
 
-        torch.cuda.manual_seed(0)
+            def create_indices(dtype):
+                shape = (
+                    1,
+                    math.ceil(4096 / m_block_size),
+                    num_head,
+                    top_k,
+                    m_block_size,
+                )
+                torch_tensor = torch.full(shape, -1, dtype=dtype).movedim(4, 3).cuda()
+                cute_tensor = FlashTopK._convert(torch_tensor, 3, 4)
+                return cute_tensor, torch_tensor
 
-        q, _q_torch = create_tensor()
-        k, _k_torch = create_tensor()
-        v, _v_torch = create_tensor()
-        o, _o_torch = create_tensor()
-        i, _i_torch = create_indices(torch.int32)
-        t, _t_torch = create_indices(torch.float32)
-        lse, _lse_torch = create_lse()
+            def create_lse():
+                torch_tensor = torch.full(
+                    (1, head_dim, 4096), -1, dtype=torch.float32
+                ).cuda()
+                cute_tensor = FlashTopK._convert(torch_tensor, 2, 128)  # ragged last
+                return cute_tensor, torch_tensor
 
-        torch_stream = torch.cuda.current_stream()
-        stream = cuda.CUstream(torch_stream.cuda_stream)
-        func = cute.compile(kernel, q, k, v, o, i, t, lse, softmax_scale, stream)
+            torch.cuda.manual_seed(0)
+
+            q_cute, _q_torch = create_tensor()
+            k_cute, _k_torch = create_tensor()
+            v_cute, _v_torch = create_tensor()
+            o_cute, _o_torch = create_tensor()
+            i_cute, _i_torch = create_indices(torch.int32)
+            t_cute, _t_torch = create_indices(torch.float32)
+            lse_cute, _lse_torch = create_lse()
+
+            torch_stream = torch.cuda.current_stream()
+            stream = cuda.CUstream(torch_stream.cuda_stream)
+            func = cute.compile(
+                kernel,
+                q_cute,
+                k_cute,
+                v_cute,
+                o_cute,
+                i_cute,
+                t_cute,
+                lse_cute,
+                softmax_scale,
+                stream,
+            )
+
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            func.export_to_c(
+                file_path=str(cache.parent),
+                file_name=str(cache.name),
+                function_prefix="func",
+            )
 
         @torch.library.custom_op(
-            f"wsivit::flash_topk_{head_dim}_{num_head}_"
-            f"{m_block_size}_{n_block_size}_{num_threads}_{is_causal}_{top_k}",
+            f"wsivit::{cache_key}",
             mutates_args={},
             device_types="cuda",
         )
@@ -1590,12 +1633,12 @@ def example():
     print("Compiling kernel...")
     start = time.perf_counter()
     num_head = 4
-    num_tokens = 4096
+    num_tokens = 1_000_000
     scale = 1 / 8
     # NSA configuratie, top 8 (or 16) blocks
     ftk = FlashTopK(
         head_dim=64,
-        num_head=num_head,
+        num_heads=num_head,
         top_k=8,
         log_smem=True,
         softmax_scale=scale,
@@ -1610,7 +1653,7 @@ def example():
         torch.library.opcheck(ftk.flash_topk, (q, k, v), raise_exception=False)
         print("opcheck OK")
         q.requires_grad_(True), k.requires_grad_(True), v.requires_grad_(True)
-        o_ftk, _, _, lse_ftk = ftk(q, k, v)
+        o_ftk, i_ftk, _, lse_ftk = ftk(q, k, v)
         lse_torch = (
             torch.einsum("qd,kd->qk", q[0, :16, 0, :].float(), k[0, :, 0, :].float())
             .mul(scale)
@@ -1625,10 +1668,10 @@ def example():
             q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), scale=scale
         ).transpose(1, 2)
         o_nn.sum().backward()
-        # ATOL is a bit on the high side (0.0005), but there's no real way around it
+        # ATOL is a bit on the high side (0.0005), but I'm pretty sure it's rounding
         # given BF16 and large reductions. RTOL is default for BF16.
         torch.testing.assert_close(o_ftk, o_nn, atol=5e-4, rtol=1.6e-2)
-        print("output OK")
+        print(f"output OK ({i_ftk.max()=}")
         torch.testing.assert_close(q.grad, qg_ftk, atol=5e-4, rtol=1.6e-2)
         torch.testing.assert_close(k.grad, kg_ftk, atol=5e-4, rtol=1.6e-2)
         torch.testing.assert_close(v.grad, vg_ftk, atol=5e-4, rtol=1.6e-2)
@@ -1642,12 +1685,12 @@ def example():
     print(f"Forward pass in {(time.perf_counter() - start) * 1000:.1f}ms")
     print(f"{o.shape=} {i.shape=} {t.shape=} {lse.shape=}")
     print(f"lse values: {lse.flatten()[:10]}")
-    print("Predicted top-K: (first 8)")
+    print(f"Predicted top-K: (first 8) has largest idx {i.max()}")
     print(f"values: {t[0, :8, 0]}")
     print(f"indices: {i[0, :8, 0]}")
     print("Actual top-K (can differ slightly due to ties):")
     scores = torch.einsum("qd,kd->qk", q[0, :8, 0].float(), k[0, :, 0].float())
-    print(scores.topk(8, dim=1))
+    print(scores.topk(min(8, num_tokens), dim=1))
 
     # Example shapes:
     #       o       [1, 4096, 4, 64]

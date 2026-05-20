@@ -53,5 +53,7 @@ flash-attn = { MAX_JOBS = "8" }
 # Or if compilation is very unlikely to succeed, try uncommenting this line instead:
 #flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 
+[tool.ruff.lint]
+ignore = ["SIM300"]
 
 

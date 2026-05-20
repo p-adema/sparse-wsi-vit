@@ -2,354 +2,337 @@
 Approach C: Native Sparse Attention (NSA) for WSI slide encoding.
 """
 
-# Native Sparse Pytorch + ViT-5 adapter
-import logging
+import functools
 import math
-from functools import partial  # for RMSNorm
 
-import timm.layers  # for init weights
 import torch
 import torch.nn as nn
-from einops import rearrange
-from torch import Tensor
-from torch.nn.attention.flex_attention import create_block_mask, flex_attention
-from torch.utils.checkpoint import checkpoint
+import torch.utils.checkpoint
+from torch.nn.attention.flex_attention import BlockMask, flex_attention, noop_mask
 
-from sparse_wsi_vit.models.abmil import (
-    ABMIL,
-)  # used instead of CLS for aggregation; can do ablations if time permits
-
-# local stuff
 from sparse_wsi_vit.models.nsa_kernels.flash_topk import FlashTopK
-from sparse_wsi_vit.models.vit_5.models_vit5 import Block, RMSNorm
+from sparse_wsi_vit.models.vit_5.models_vit5 import RMSNorm, vit_models
 from sparse_wsi_vit.models.vit_5.rope import VisionRotaryEmbedding
-
-try:
-    from flash_attn import flash_attn_func
-except ImportError:
-    logging.warning("FlashAttention not found, git gud scrub")
-
-
-def mean_pooling(x, block_size):
-    B, T, H, D = x.shape
-    return x.view(B, T // block_size, block_size, H, D).mean(dim=2)
 
 
 class NativeSparseAttention(nn.Module):
-    """
-    Core NSA module, handles projections and calls kernels.
-    """
-
+    # taken from https://github.com/rwightman/pytorch-image-models/blob/master/timm/models/vision_transformer.py
     def __init__(
         self,
-        d_model: int,
-        num_q_heads: int = 16,
-        num_kv_heads: int = 1,
-        head_dim: int | None = None,
-        block_size: int = 64,  # 8x8 h5 macro blocks input
-        block_counts: int = 16,
-        rope_coord_high: float = 100_000.0,
+        dim,
+        num_heads=8,
+        qkv_bias=False,
+        qk_scale=None,
+        attn_drop=0.0,
+        proj_drop=0.0,
+        flash=True,
+        rope_size=0,
+        rope_reg_size=0,
+        rope_dynamic=False,
+        rope_dynamic_high=100_000,
+        num_registers=0,
+        reg_theta=10000,
+        qk_norm=False,
+        *,  # NSA specific arguments:
+        top_k: int,
+        block_size: int = 128,
+        reg_rope_dynamic_high: float = 1 / 64,
+        kernel_block_m: int = 64,
+        kernel_block_n: int = 128,
     ):
+        print(f"{qk_norm=} {attn_drop=} {proj_drop=} {rope_reg_size=} {num_registers=}")
         super().__init__()
-        assert num_q_heads % (num_kv_heads * 16) == 0, (
-            "NSA needs HQ to be a multiple of 16 * HKV"
+        self.num_heads = num_heads
+        head_dim = dim // num_heads
+        self.scale = qk_scale or head_dim**-0.5
+
+        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(dim, dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+
+        self.flash = flash
+        assert num_registers % block_size == 0
+        self.num_registers = num_registers
+        self.rope = (
+            VisionRotaryEmbedding(
+                head_dim // 2,
+                rope_size,
+                dynamic=rope_dynamic,
+                coord_high=rope_dynamic_high,
+            )
+            if rope_size > 0
+            else None
         )
-
-        self.num_q_heads = num_q_heads
-        self.num_kv_heads = num_kv_heads
-        # explicit if provided, otherwise derived
-        self.head_dim = head_dim if head_dim is not None else d_model // num_q_heads
-
-        assert self.head_dim in [
-            64,
-            128,
-        ], f"Kernels enjoy head_dim 64 or 128, got {self.head_dim}"
-
+        self.rope_reg = (
+            VisionRotaryEmbedding(head_dim // 2, rope_reg_size, theta=reg_theta)
+            if rope_reg_size > 0
+            else None
+        )
+        self.rope_reg_size = rope_reg_size
         self.block_size = block_size
-        self.block_counts = block_counts
 
-        self.q_proj = nn.Linear(d_model, num_q_heads * self.head_dim, bias=False)
-        self.k_proj = nn.Linear(d_model, num_kv_heads * self.head_dim, bias=False)
-        self.v_proj = nn.Linear(d_model, num_kv_heads * self.head_dim, bias=False)
+        self.qk_norm = qk_norm
+        if qk_norm:
+            self.q_norm = RMSNorm(head_dim, eps=1e-6)
+            self.k_norm = RMSNorm(head_dim, eps=1e-6)
 
-        self.rope = VisionRotaryEmbedding(
-            dim=self.head_dim // 2,
-            freqs_for="pixel",  # hmm
-            coord_high=rope_coord_high,
-            dynamic=True,
-        )
+        self.g_proj = nn.Linear(dim, num_heads * 2, bias=False)
 
-        # gates for dynamic block selection
-        self.g_proj = nn.Linear(d_model, num_q_heads * 2, bias=False)
-        # !!! for now just two gates for global and sparse branches
-        self.out_proj = nn.Linear(num_q_heads * self.head_dim, d_model, bias=False)
-
-        self.get_blocks = FlashTopK(
-            head_dim=self.head_dim,
-            num_head=num_q_heads,
-            top_k=block_counts,  # !!! need GQA inflation
+        self.flash_topk = FlashTopK(
+            head_dim=head_dim,
+            num_heads=num_heads,
+            top_k=top_k,
             is_causal=False,
-            softmax_scale=1 / math.sqrt(self.head_dim),  # standard scale
-            m_block_size=64,  # temp for testing, can remove on A100/H100
+            softmax_scale=1 / math.sqrt(head_dim),  # standard scale
+            m_block_size=kernel_block_m,
+            n_block_size=kernel_block_n,
+        )
+        flex = torch.compile(flex_attention)
+
+        @torch.compiler.disable(reason="autotune crashes")
+        def _flex(*args, **kwargs):
+            return flex(*args, **kwargs)
+
+        self.flex_attn = _flex
+
+    def forward(self, x, coords=None):
+        B, N, C = x.shape
+
+        assert N % self.block_size == 0
+        N_BLK = N // self.block_size
+
+        head_dim = C // self.num_heads
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, head_dim)
+        q, k, v = qkv.unbind(dim=2)
+
+        g_cmp, g_sel = (
+            self.g_proj(x).view(B, N, 2, self.num_heads).softmax(2).unbind(dim=2)
         )
 
-    def _create_wsi_block_mask(self, block_indices, q_len, kv_len):
-        B, H, _, _ = block_indices.shape
-        block_size = self.block_size
+        if self.qk_norm:
+            qk_dtype = q.dtype
+            q = self.q_norm(q).to(qk_dtype)
+            k = self.k_norm(k).to(qk_dtype)
 
-        def local_or_sparse_mask(b, h, q_idx, kv_idx):
-            q_blk = q_idx // block_size  # macro grid
-            kv_blk = kv_idx // block_size
+        if self.rope is not None:
+            q_cls, q_img = q[:, : self.num_registers], q[:, self.num_registers :]
+            k_cls, k_img = k[:, : self.num_registers], k[:, self.num_registers :]
+            q_img = self.rope(q_img, coords)
+            k_img = self.rope(k_img, coords)
 
-            is_local = q_blk == kv_blk  # for local attention
-            selected = torch.any(
-                block_indices[b, h, q_blk] == kv_blk
-            )  # for block sparse
+            if self.rope_reg is not None:
+                reg_start = self.num_registers - self.rope_reg_size**2
+                q_cls, q_reg = q[:, :reg_start], q[:, reg_start : self.num_registers]
+                k_cls, k_reg = k[:, :reg_start], k[:, reg_start : self.num_registers]
+                q_reg = self.rope_reg(q_reg, coords)
+                k_reg = self.rope_reg(k_reg, coords)
 
-            return (
-                is_local | selected
-            )  # either is ok; note that we treat it the same here (joint softmax so we should maybe try separating later)
+                q = torch.cat((q_cls, q_reg, q_img), dim=1)
+                k = torch.cat((k_cls, k_reg, k_img), dim=1)
+            else:
+                q = torch.cat((q_cls, q_img), dim=1)
+                k = torch.cat((k_cls, k_img), dim=1)
 
-        return create_block_mask(
-            local_or_sparse_mask, B=B, H=H, Q_LEN=q_len, KV_LEN=kv_len
-        )
+        q_cmp = q.view(B, N_BLK, self.block_size, self.num_heads, head_dim).mean(2)
+        k_cmp = k.view(B, N_BLK, self.block_size, self.num_heads, head_dim).mean(2)
+        v_cmp = v.view(B, N_BLK, self.block_size, self.num_heads, head_dim).mean(2)
+        o_cmp, idx_cmp, _, _ = self.flash_topk(q_cmp, k_cmp, v_cmp)
 
-    def forward(
-        self, x: Tensor, coords: Tensor | None = None, cu_seqlens: Tensor | None = None
-    ) -> Tensor:
-        B, T, _ = x.shape
+        # [B, H, T, D] -> [B, T, H, D] and back again
+        o_sel = self.flex_attn(
+            q.transpose(1, 2),
+            k.transpose(1, 2),
+            v.transpose(1, 2),
+            block_mask=self._topk_to_block_mask(idx_cmp),
+        ).transpose(1, 2)  # ty:ignore[unresolved-attribute]
 
-        q = rearrange(self.q_proj(x), "... (h d) -> ... h d", h=self.num_q_heads)
-        k = rearrange(self.k_proj(x), "... (h d) -> ... h d", h=self.num_kv_heads)
-        v = rearrange(self.v_proj(x), "... (h d) -> ... h d", h=self.num_kv_heads)
-        # g = rearrange(self.g_proj(x), "... (h d) -> ... h d", d=3)
-        # g_cmp, g_slc, g_swa = g.sigmoid().unbind(-1)
-        # this left commented out to emphasize we dont do this anymore
-        # instead:
-        gates = rearrange(self.g_proj(x), "... (h d) -> ... h d", d=2)
-        g_cmp, g_slc = gates.sigmoid().unbind(-1)  # gated to allow for learnable focus
-
-        # CLS? fuggedaboudit not in my house 😤
-        if coords is not None:
-            q = self.rope(q, coords)
-            k = self.rope(k, coords)
-
-        # get blocks
-        q_cmp = mean_pooling(q, self.block_size)
-        k_cmp = mean_pooling(k, self.block_size)
-        v_cmp = mean_pooling(v, self.block_size)
-
-        # global compressed attention (dense FA2)
-        out_cmp = flash_attn_func(q, k_cmp, v_cmp, causal=False)
-        out_cmp = out_cmp * g_cmp.unsqueeze(-1)
-
-        # !!! needed GQA workaround, copies memory tensor 16x
-        k_cmp_timesg = (
-            k_cmp.repeat_interleave(self.num_q_heads // self.num_kv_heads, dim=2)
-            if self.num_q_heads > self.num_kv_heads
-            else k_cmp
-        )
-        v_cmp_timesg = (
-            v_cmp.repeat_interleave(self.num_q_heads // self.num_kv_heads, dim=2)
-            if self.num_q_heads > self.num_kv_heads
-            else v_cmp
-        )
-
-        _out, block_indices, _, _ = self.get_blocks(q_cmp, k_cmp_timesg, v_cmp_timesg)
-        topk_indices = rearrange(block_indices, "b s h k -> b h s k")
-
-        sparse_mask = self._create_wsi_block_mask(topk_indices, q_len=T, kv_len=T)
-
-        # [B, H, T, D] -> [B, T, H, D] flex needs
-        q_flex = q.transpose(1, 2)
-        k_flex = k.transpose(1, 2)
-        v_flex = v.transpose(1, 2)
-
-        out_sparse_flex = flex_attention(q_flex, k_flex, v_flex, block_mask=sparse_mask)
-        out_sparse = out_sparse_flex.transpose(1, 2) * g_slc.unsqueeze(-1)
-
-        out = out_cmp + out_sparse
-
-        return self.out_proj(out.reshape(B, T, -1))
-
-
-class NSAViTWrapper(nn.Module):
-    """Adapts NSA to ViT-5 Attention_Block API. The * ensures only keyword args for the custom ones, **_ absorbs silently."""
-
-    def __init__(
-        self,
-        dim: int,
-        num_heads: int = 16,
-        num_kv_heads: int = 1,
-        block_size: int = 64,
-        block_counts: int = 16,
-        rope_coord_high: float = 100_000.0,
-        **_,
-    ) -> None:
-        super().__init__()
-        self.attn = NativeSparseAttention(
-            d_model=dim,
-            num_q_heads=num_heads,
-            num_kv_heads=num_kv_heads,
-            block_size=block_size,
-            block_counts=block_counts,
-            rope_coord_high=rope_coord_high,
-        )
-
-    def forward(
-        self, x: Tensor, coords: Tensor | None = None, cu_seqlens: Tensor | None = None
-    ) -> Tensor:
-        return self.attn(x, coords=coords, cu_seqlens=cu_seqlens)
-
-
-class NSABlock(Block):
-    """Inherits from ViT5 Block, makes it easier to adapt later if necessary"""
-
-    def __init__(
-        self,
-        dim: int,
-        num_heads: int,
-        # nsa stuff
-        block_size: int = 64,
-        block_counts: int = 16,
-        num_kv_heads: int = 1,
-        rope_coord_high: float = 100_000.0,
-        **kwargs,
-    ) -> None:
-        nsa_wrapped_attn = partial(
-            NSAViTWrapper,
-            num_kv_heads=num_kv_heads,
-            block_size=block_size,
-            block_counts=block_counts,
-            rope_coord_high=rope_coord_high,
-        )
-        super().__init__(
-            dim=dim, num_heads=num_heads, Attention_block=nsa_wrapped_attn, **kwargs
-        )
-
-    # AI written code, bewware
-    def forward(
-        self, x: Tensor, coords: Tensor | None = None, cu_seqlens: Tensor | None = None
-    ) -> Tensor:
-        if self.layer_scale:
-            x = x + self.drop_path(
-                self.gamma_1
-                * self.attn(self.norm1(x), coords=coords, cu_seqlens=cu_seqlens)
-            )
-            x = x + self.drop_path(self.gamma_2 * self.mlp(self.norm2(x)))
-        else:
-            x = x + self.drop_path(
-                self.attn(self.norm1(x), coords=coords, cu_seqlens=cu_seqlens)
-            )
-            x = x + self.drop_path(self.mlp(self.norm2(x)))
+        x = (
+            o_cmp.view(B, N_BLK, 1, self.num_heads, head_dim)
+            * g_cmp.view(B, N_BLK, self.block_size, self.num_heads, 1)
+            + o_sel.view(B, N_BLK, self.block_size, self.num_heads, head_dim)
+            * g_sel.view(B, N_BLK, self.block_size, self.num_heads, 1)
+        ).view(B, N, C)
+        x = self.proj(x)
+        x = self.proj_drop(x)
         return x
+
+    def _topk_to_block_mask(self, idx_cmp: torch.Tensor):
+        block_indices = idx_cmp.transpose(1, 2)
+        B, H, N_BLK, K = block_indices.shape
+
+        full_dense = block_indices.new_zeros(B, H, N_BLK, N_BLK, dtype=torch.int8)
+        torch.diagonal(full_dense, dim1=2, dim2=3).fill_(1)
+        full_dense.scatter_(3, block_indices, 1)
+        reg_blocks = self.num_registers // self.block_size
+        full_dense[..., :reg_blocks, :] = 1
+        full_dense[..., :, :reg_blocks] = 1
+
+        full_kv_num_blocks = full_dense.sum(-1, dtype=torch.int32)
+        full_kv_indices = full_dense.argsort(dim=-1, descending=True, stable=True)
+        full_kv_indices = full_kv_indices.to(torch.int32)
+
+        full_dense.transpose_(-1, -2)
+        full_q_num_blocks = full_dense.sum(-1, dtype=torch.int32)
+        full_q_indices = full_dense.argsort(dim=-1, descending=True, stable=True)
+        full_q_indices = full_q_indices.to(torch.int32)
+
+        # Trivial empty, all blocks are full blocks
+        kv_num_blocks = q_num_blocks = block_indices.new_zeros(B, H, N_BLK)
+        kv_indices = q_indices = block_indices.new_empty((B, H, N_BLK, N_BLK))
+
+        seq_lengths = (N_BLK * self.block_size, N_BLK * self.block_size)
+        BLOCK_SIZE = (self.block_size, self.block_size)
+        mask_mod = noop_mask
+
+        return BlockMask(
+            seq_lengths,
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+            q_num_blocks,
+            q_indices,
+            full_q_num_blocks,
+            full_q_indices,
+            BLOCK_SIZE,
+            mask_mod,
+        )
+
+
+class _RegpoolVit5(vit_models):
+    def __init__(self, block_size: int = 128, **kwargs):
+        super().__init__(**kwargs)
+        self.block_size = block_size
+
+    def forward_features(self, x, coords=None):
+        """Don't use CLS, but instead mean-pool over registers like SSA impl."""
+        assert coords is not None
+        assert self.reg_token is not None
+
+        B, N, D = x.shape
+        x = self.patch_embed(x)
+
+        registers = self.reg_token.expand(B, -1, -1)
+
+        if self.pos_embed is not None:
+            x = x + self.pos_embed
+
+        # crop the last couple positions, not optimal, but it shouldn't matter much.
+        x = x[:, : N // self.block_size * self.block_size]
+        coords = coords[:, : N // self.block_size * self.block_size]
+
+        x = torch.cat((registers, x), dim=1)
+
+        for i, blk in enumerate(self.blocks):
+            # print(f"block {i}! {torch.cuda.memory_allocated()/1e9}GB alloc")
+            if self.checkpoint_activations:
+                x = torch.utils.checkpoint.checkpoint(
+                    blk, x, coords, use_reentrant=False
+                )
+            else:
+                x = blk(x, coords)
+
+        x = self.norm(x)
+        return x[:, 0]
 
 
 class NSAViTSlideEncoder(nn.Module):
-    """Slide-level ViT encoder using Native Sparse Attention.
+    """VitDensePreEmbedded but with Native Sparse Attention blocks"""
 
-    Takes a bag of pre-extracted patch embeddings and produces a slide-level classification. Mirrors API of StaticSparse/DSA SlideEncoder but uses ABMIL pooling instead of CLS tokens for global aggregation.
-    """
-
-    # (can do ablations or whatever if there's time but idk)
     def __init__(
         self,
         in_features: int = 1280,
         out_features: int = 1,
-        embed_dim: int = 1024,
-        num_heads: int = 16,
-        num_layers: int = 6,
-        num_cls: int = 0,  # for API parity but don't feed it any
-        block_size: int = 64,
-        block_counts: int = 16,
-        expansion_factor: float = 4.0,
-        attn_dropout: float = 0.0,
-        proj_dropout: float = 0.0,
-        gradient_checkpointing: bool = False,
-        rope_coord_high: float = 100_000.0,
-        **kwargs,
-    ) -> None:
+        downproj: int | None = None,
+        top_k: int = 16,
+        block_size: int = 128,
+        reg_rope_dynamic_high=1 / 64,  # unused by default
+        num_registers: int | None = None,
+        reg_theta=100,
+        qk_norm=True,
+        qkv_bias=False,
+        rope_reg: bool | str = "partial",
+        **vit5_kwargs,  # checkpoint_activations, depth, rope_dynamic_high, num_heads
+    ):
         super().__init__()
-
-        self.gradient_checkpointing = gradient_checkpointing
-        self.embed_dim = embed_dim
         self.out_features = out_features
+        self.in_features = in_features
+        self.vit5 = _RegpoolVit5(
+            num_classes=out_features,
+            drop_rate=0.0,
+            drop_path_rate=0.1,
+            pre_embedded_input=True,
+            ape=False,  # it's learnable, which breaks with variable size inputs.
+            patch_size=1,  # each token is a patch, effectively
+            rope=True,
+            rope_dynamic=True,
+            rope_reg=rope_reg,
+            embed_dim=in_features if downproj is None else downproj,
+            Attention_block=functools.partial(
+                NativeSparseAttention,
+                top_k=top_k,
+                block_size=block_size,
+                reg_rope_dynamic_high=reg_rope_dynamic_high,
+            ),
+            num_registers=block_size if num_registers is None else num_registers,
+            reg_theta=reg_theta,
+            qk_norm=qk_norm,
+            qkv_bias=qkv_bias,
+            **vit5_kwargs,
+        )
+        self.down = nn.Linear(in_features, downproj) if downproj else None
 
-        if num_cls > 0:
-            logging.warning(
-                "NSAViTSlideEncoder ignores num_cls, and uses ABMIL for pooling instead."
+        if self.down:
+            nn.init.orthogonal_(self.down.weight)
+            nn.init.zeros_(self.down.bias)
+
+    def forward(self, x: torch.Tensor, coords: torch.Tensor) -> dict:
+        """Run a forward pass over a feature bag.
+
+        Args:
+            x: Instance features of shape (B, N, D) or (N, D). A batch dimension
+                is added automatically when the input is 2-D.
+            coords: Coordinates for each feature embedding in the WSI, shape (B, N, 2)
+                or (N, 2).
+
+        Returns:
+            A dictionary with:
+                - ``"logits"`` (torch.Tensor): Bag-level predictions, shape (B, out_features).
+                - ``"attention"`` (torch.Tensor, optional): Attention weights,
+                  shape (B, num_branches, N). Only present when *return_attention* is True.
+
+        Raises:
+            ValueError: If *x* is not 2-D or 3-D, or if the feature dimension does
+                not match ``in_features``.
+        """
+        if x.dim() not in (2, 3):
+            raise ValueError(
+                f"Expected 2-D (N, D) or 3-D (B, N, D) input, got {x.shape=}"
+            )
+        if coords.dim() not in (2, 3):
+            raise ValueError(
+                f"Expected 2-D (N, D) or 3-D (B, N, D) input, got {coords.shape=}"
             )
 
-        # project patch embeddings
-        self.input_proj = nn.Linear(in_features, embed_dim)
+        # Ensure batch dimension
+        if x.dim() == 2:
+            x = x.unsqueeze(0)
+        if coords.dim() == 2:
+            coords = coords.unsqueeze(0)
+        if coords.size(1) != x.size(1):
+            raise ValueError(f"{x.shape=} and {coords.shape} must agree on N")
 
-        # NSA Blocks
-        self.layers = nn.ModuleList(
-            [
-                NSABlock(
-                    dim=embed_dim,
-                    num_heads=num_heads,
-                    block_size=block_size,
-                    block_counts=block_counts,
-                    num_kv_heads=1,
-                    mlp_ratio=expansion_factor,
-                    drop=proj_dropout,
-                    attn_drop=attn_dropout,
-                    norm_layer=partial(
-                        RMSNorm, eps=1e-6
-                    ),  # apparently RMSNorm is better
-                    rope_coord_high=rope_coord_high,
-                )
-                for _ in range(num_layers)
-            ]
-        )
+        B, N, D = x.shape
+        if D != self.in_features:
+            raise ValueError(
+                f"Feature dimension mismatch: expected {self.in_features}, got {D}."
+            )
 
-        self.norm = RMSNorm(embed_dim, eps=1e-6)
+        if self.down is not None:
+            x = self.down(x)
 
-        # ABMIL Aggregation
-        self.pooler = ABMIL(
-            in_features=embed_dim,
-            hidden_dim=256,
-            out_features=out_features,
-            num_branches=1,
-            attention_dropout=proj_dropout,
-        )
+        logits = self.vit5(x, coords)  # (B, out_features)
 
-        self.apply(self._init_weights)
-
-    # maybe should change init_weights here? review, compare dsa vs standard vit5 init
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            # DSA logic: Preserve variance of Virchow2 features at the input
-            if m is self.input_proj:
-                nn.init.xavier_uniform_(m.weight)
-            # ViT logic: Stabilize the deep attention and MLP layers
-            else:
-                timm.layers.trunc_normal_(m.weight, std=0.02)
-
-            if m.bias is not None:
-                nn.init.zeros_(m.bias)
-
-        elif isinstance(m, (nn.LayerNorm, RMSNorm)):
-            if hasattr(m, "bias") and m.bias is not None:
-                nn.init.zeros_(m.bias)
-            nn.init.ones_(m.weight)
-
-    def forward(
-        self,
-        x: torch.Tensor,
-        coords: torch.Tensor | None = None,
-        cu_seqlens: torch.Tensor | None = None,
-        true_lengths: torch.Tensor | None = None,
-    ) -> dict:
-        h = self.input_proj(x)
-
-        for layer in self.layers:
-            if self.gradient_checkpointing and self.training:
-                h = checkpoint(layer, h, coords, cu_seqlens, use_reentrant=False)
-            else:
-                h = layer(h, coords=coords, cu_seqlens=cu_seqlens)
-
-        h = self.norm(h)
-        # ABMIL returns a dict containing {"logits": ..., "attention": ...}
-        return self.pooler(h, lengths=true_lengths, return_attention=True)
+        out = {"logits": logits}
+        return out
