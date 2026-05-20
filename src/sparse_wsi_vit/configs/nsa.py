@@ -50,13 +50,13 @@ ROPE_DYNAMIC_HIGH = FEATURES_SCALE * DOWNSCALE_BLOCK
 NSA_TOP_K = 16
 NSA_BLOCK_SIZE = 128
 
-TRAINING_ITERATIONS = 5_000
+TRAINING_ITERATIONS = 3_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
-LEARNING_RATE = 3e-4
+LEARNING_RATE = 1e-4
 WEIGHT_DECAY = 1e-4
 GRAD_CLIP = 1.0
 ACCUMULATE_GRAD_STEPS = 5
-PATIENCE = 10  # Early stopping
+PATIENCE = 20  # Early stopping
 # Training will stop after 9h30m, after which testing will start.
 # Set job duration to ~11h to ensure testing is not interrupted
 MAX_DURATION = datetime.timedelta(hours=9, minutes=30)
@@ -96,12 +96,13 @@ def get_config() -> ExperimentConfig:
         depth=DEPTH,
         top_k=NSA_TOP_K,
         block_size=NSA_BLOCK_SIZE,
+        rope_reg=False,
     )
 
     # Lightning wrapper mappings
     config.lightning_wrapper_class = LazyConfig(WSIAttnWrapper)(
         use_bce_loss=(OUT_FEATURES == 1),
-        compile_mode=None,  # flex attention dies on my machine :(
+        compile_mode=None,
     )
 
     # Optimizer

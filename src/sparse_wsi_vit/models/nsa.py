@@ -36,11 +36,9 @@ class NativeSparseAttention(nn.Module):
         *,  # NSA specific arguments:
         top_k: int,
         block_size: int = 128,
-        reg_rope_dynamic_high: float = 1 / 64,
         kernel_block_m: int = 64,
         kernel_block_n: int = 128,
     ):
-        print(f"{qk_norm=} {attn_drop=} {proj_drop=} {rope_reg_size=} {num_registers=}")
         super().__init__()
         self.num_heads = num_heads
         head_dim = dim // num_heads
@@ -88,11 +86,20 @@ class NativeSparseAttention(nn.Module):
             m_block_size=kernel_block_m,
             n_block_size=kernel_block_n,
         )
-        flex = torch.compile(flex_attention)
+        flex = torch.compile(flex_attention, dynamic=True)
 
         @torch.compiler.disable(reason="autotune crashes")
-        def _flex(*args, **kwargs):
-            return flex(*args, **kwargs)
+        def _flex(q, k, v, **kwargs):
+            torch._dynamo.mark_dynamic(
+                q, 2, min=128, max=16_000_000, hint_override=200_000
+            )
+            torch._dynamo.mark_dynamic(
+                k, 2, min=128, max=16_000_000, hint_override=200_000
+            )
+            torch._dynamo.mark_dynamic(
+                v, 2, min=128, max=16_000_000, hint_override=200_000
+            )
+            return flex(q, k, v, **kwargs)
 
         self.flex_attn = _flex
 
@@ -247,7 +254,6 @@ class NSAViTSlideEncoder(nn.Module):
         downproj: int | None = None,
         top_k: int = 16,
         block_size: int = 128,
-        reg_rope_dynamic_high=1 / 64,  # unused by default
         num_registers: int | None = None,
         reg_theta=100,
         qk_norm=True,
@@ -273,7 +279,6 @@ class NSAViTSlideEncoder(nn.Module):
                 NativeSparseAttention,
                 top_k=top_k,
                 block_size=block_size,
-                reg_rope_dynamic_high=reg_rope_dynamic_high,
             ),
             num_registers=block_size if num_registers is None else num_registers,
             reg_theta=reg_theta,
