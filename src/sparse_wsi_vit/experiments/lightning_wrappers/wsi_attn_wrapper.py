@@ -110,7 +110,7 @@ class WSIAttnWrapper(LightningWrapperBase):
             device,
         )
         if "class_weight" in batch:
-            logger.info("  class_weight: %s", batch["class_weight"].detach().cpu().tolist())
+            logger.info("  class_weight: %s", batch["class_weight"])
 
         inputs = inputs.to(device, non_blocking=True)
         coords = coords.to(device, non_blocking=True)
