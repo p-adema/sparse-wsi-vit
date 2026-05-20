@@ -1,3 +1,4 @@
+import logging
 import time
 
 import torch
@@ -8,6 +9,8 @@ from sparse_wsi_vit.experiments.default_cfg import ExperimentConfig
 from sparse_wsi_vit.experiments.lightning_wrappers.base_lightning_wrapper import (
     LightningWrapperBase,
 )
+
+logger = logging.getLogger(__name__)
 
 class WSIAttnWrapper(LightningWrapperBase):
     """Lightning wrapper for global attention on WSIs."""
@@ -74,7 +77,7 @@ class WSIAttnWrapper(LightningWrapperBase):
             distances, crop_tokens, dim=-1, largest=False, sorted=False
         ).indices
         batch["coords"] = batch["coords"].gather(1, closest.unsqueeze(-1).expand(-1, -1, 2))
-        batch["input"] = batch["input"].gather(1, closest.unsqueeze(-1).expand_as(batch["input"]))
+        batch["input"] = batch["input"].gather(1, closest.unsqueeze(-1).expand(-1, -1, batch["input"].size(-1)))
 
     def _step(
         self,
@@ -95,9 +98,28 @@ class WSIAttnWrapper(LightningWrapperBase):
         labels = batch["label"]
 
         device = next(self.network.parameters()).device
+        logger.info(
+            "STEP BATCH  input: shape=%s dtype=%s device=%s | "
+            "coords: shape=%s dtype=%s device=%s | "
+            "labels: shape=%s dtype=%s device=%s values=%s | "
+            "model device=%s",
+            inputs.shape, inputs.dtype, inputs.device,
+            coords.shape, coords.dtype, coords.device,
+            labels.shape, labels.dtype, labels.device,
+            labels.detach().cpu().tolist(),
+            device,
+        )
+        if "class_weight" in batch:
+            logger.info("  class_weight: %s", batch["class_weight"].detach().cpu().tolist())
+
         inputs = inputs.to(device, non_blocking=True)
         coords = coords.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True)
+
+        logger.info(
+            "AFTER .to(device)  input: device=%s | coords: device=%s | labels: device=%s",
+            inputs.device, coords.device, labels.device,
+        )
 
         torch._dynamo.mark_dynamic(inputs, 1)
         torch._dynamo.mark_dynamic(coords, 1)
@@ -105,6 +127,13 @@ class WSIAttnWrapper(LightningWrapperBase):
         output_dict = self.network(inputs, coords)
 
         logits = output_dict["logits"].squeeze(1)
+        logger.info(
+            "LOGITS  shape=%s dtype=%s device=%s | values=%s | "
+            "has_nan=%s has_inf=%s",
+            logits.shape, logits.dtype, logits.device,
+            logits.detach().cpu().tolist(),
+            torch.isnan(logits).any().item(), torch.isinf(logits).any().item(),
+        )
 
         if not self.multiclass and self.use_bce_loss:
             loss = self.loss_metric(logits, labels.float())
@@ -114,6 +143,15 @@ class WSIAttnWrapper(LightningWrapperBase):
             preds = torch.argmax(logits, dim=-1)
         if "class_weight" in batch:
             loss *= batch["class_weight"]
+
+        logger.info(
+            "LOSS  value=%.6f has_nan=%s has_inf=%s | "
+            "preds=%s labels=%s | requires_grad=%s",
+            loss.item(),
+            torch.isnan(loss).any().item(), torch.isinf(loss).any().item(),
+            preds.detach().cpu().tolist(), labels.detach().cpu().tolist(),
+            loss.requires_grad,
+        )
 
         metric_device = getattr(accuracy_calculator, "device", next(self.parameters()).device)
         accuracy_calculator.update(preds.to(metric_device), labels.to(metric_device))
@@ -132,6 +170,12 @@ class WSIAttnWrapper(LightningWrapperBase):
         Returns:
             Scalar training loss.
         """
+        logger.info(
+            "===== TRAINING STEP %d =====  cuda_allocated=%.1fMB cuda_reserved=%.1fMB",
+            batch_idx,
+            torch.cuda.memory_allocated() / 1e6 if torch.cuda.is_available() else 0,
+            torch.cuda.memory_reserved() / 1e6 if torch.cuda.is_available() else 0,
+        )
         self._maybe_crop_batch(batch, self.training_crop_tokens)
 
         t0 = time.perf_counter()
@@ -176,6 +220,25 @@ class WSIAttnWrapper(LightningWrapperBase):
                 on_step=True,
                 on_epoch=True,
             )
+
+        grad_norms = {}
+        for name, param in self.network.named_parameters():
+            if param.grad is not None:
+                grad_norms[name] = param.grad.norm().item()
+        if grad_norms:
+            total_norm = sum(v ** 2 for v in grad_norms.values()) ** 0.5
+            max_name = max(grad_norms, key=grad_norms.get)
+            nan_grads = [n for n, v in grad_norms.items() if v != v]
+            logger.info(
+                "GRADIENTS  total_norm=%.6f | max_grad=%.6f (%s) | "
+                "num_params_with_grad=%d/%d | nan_grads=%s",
+                total_norm, grad_norms[max_name], max_name,
+                len(grad_norms), sum(1 for _ in self.network.parameters()),
+                nan_grads if nan_grads else "none",
+            )
+        else:
+            logger.info("GRADIENTS  no gradients computed yet (before first backward)")
+
         return loss
 
     def on_train_epoch_end(self) -> None:
@@ -202,6 +265,12 @@ class WSIAttnWrapper(LightningWrapperBase):
         return self._val_or_test_step(batch, kind="test")
 
     def _val_or_test_step(self, batch: dict[str, Tensor], kind: str = "val") -> Tensor:
+        logger.info(
+            "===== %s STEP =====  cuda_allocated=%.1fMB cuda_reserved=%.1fMB",
+            kind.upper(),
+            torch.cuda.memory_allocated() / 1e6 if torch.cuda.is_available() else 0,
+            torch.cuda.memory_reserved() / 1e6 if torch.cuda.is_available() else 0,
+        )
         self._maybe_crop_batch(batch, self.eval_crop_tokens)
 
         t0 = time.perf_counter()

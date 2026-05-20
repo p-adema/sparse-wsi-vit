@@ -4,6 +4,7 @@ WSI slide encoder using ViT-5 blocks with configurable sparse attention.
 
 from __future__ import annotations
 
+import logging
 from functools import partial
 
 import torch
@@ -16,6 +17,8 @@ from sparse_wsi_vit.models.static_sparse_attention import (
     StaticSparseAttentionAdapter,
     hilbert_sort,
 )
+
+logger = logging.getLogger(__name__)
 
 
 _SPARSE_ATTN_TYPES = ("static")
@@ -183,18 +186,51 @@ class SparseViT5SlideEncoder(nn.Module):
             coords = coords.unsqueeze(0)
 
         batch_size = x.shape[0]
+        logger.info(
+            "ENCODER INPUT  x: shape=%s dtype=%s device=%s requires_grad=%s | "
+            "coords: shape=%s dtype=%s device=%s | "
+            "x range=[%.4f, %.4f] mean=%.4f | has_nan=%s has_inf=%s",
+            x.shape, x.dtype, x.device, x.requires_grad,
+            coords.shape if coords is not None else None,
+            coords.dtype if coords is not None else None,
+            coords.device if coords is not None else None,
+            x.min().item(), x.max().item(), x.mean().item(),
+            torch.isnan(x).any().item(), torch.isinf(x).any().item(),
+        )
+
+        logger.info(
+            "MODEL PARAMS  input_proj.weight: device=%s dtype=%s | "
+            "cls_tokens: device=%s dtype=%s | head.weight: device=%s dtype=%s",
+            self.input_proj.weight.device, self.input_proj.weight.dtype,
+            self.cls_tokens.device, self.cls_tokens.dtype,
+            self.head.weight.device, self.head.weight.dtype,
+        )
 
         x = self.input_proj(x)  # (batch_size, patch_len, embed_dim)
+        logger.info(
+            "AFTER input_proj  shape=%s dtype=%s | range=[%.4f, %.4f] mean=%.4f | "
+            "has_nan=%s has_inf=%s",
+            x.shape, x.dtype,
+            x.min().item(), x.max().item(), x.mean().item(),
+            torch.isnan(x).any().item(), torch.isinf(x).any().item(),
+        )
 
         if coords is not None and self.use_hilbert_sort:
             sort_idx = hilbert_sort(coords)
             x = x.gather(1, sort_idx.unsqueeze(-1).expand_as(x))
             coords = coords.gather(1, sort_idx.unsqueeze(-1).expand(-1, -1, 2))
+            logger.info("AFTER hilbert_sort  sort_idx: shape=%s device=%s", sort_idx.shape, sort_idx.device)
 
         cls = self.cls_tokens.expand(batch_size, -1, -1)  # (batch_size, num_cls, embed_dim)
         x = torch.cat([cls, x], dim=1)                     # (batch_size, num_cls + patch_len, embed_dim)
+        logger.info(
+            "AFTER cls prepend  shape=%s dtype=%s device=%s | "
+            "training=%s grad_ckpt=%s",
+            x.shape, x.dtype, x.device,
+            self.training, self.gradient_checkpointing,
+        )
 
-        for block in self.blocks:
+        for block_idx, block in enumerate(self.blocks):
             if self.gradient_checkpointing and self.training:
                 attn_fn = partial(_block_attn_half, block)
                 mlp_fn = partial(_block_mlp_half, block)
@@ -202,6 +238,13 @@ class SparseViT5SlideEncoder(nn.Module):
                 x = checkpoint(mlp_fn, x, use_reentrant=False)
             else:
                 x = block(x, coords)
+            logger.info(
+                "AFTER block[%d]  shape=%s dtype=%s | range=[%.4f, %.4f] mean=%.4f | "
+                "has_nan=%s has_inf=%s",
+                block_idx, x.shape, x.dtype,
+                x.min().item(), x.max().item(), x.mean().item(),
+                torch.isnan(x).any().item(), torch.isinf(x).any().item(),
+            )
 
         x = self.norm(x)
 
@@ -209,4 +252,14 @@ class SparseViT5SlideEncoder(nn.Module):
         weights = torch.softmax(self.cls_pool(cls_tokens), dim=1)  # (batch_size, num_cls, 1)
         cls_pooled = (weights * cls_tokens).sum(dim=1)             # (batch_size, embed_dim)
 
-        return {"logits": self.head(cls_pooled)}
+        logits = self.head(cls_pooled)
+        logger.info(
+            "ENCODER OUTPUT  logits: shape=%s dtype=%s device=%s | "
+            "values=%s | has_nan=%s has_inf=%s | "
+            "cls_pool_weights=%s",
+            logits.shape, logits.dtype, logits.device,
+            logits.detach().cpu().tolist(),
+            torch.isnan(logits).any().item(), torch.isinf(logits).any().item(),
+            weights.detach().cpu().squeeze(-1).tolist(),
+        )
+        return {"logits": logits}

@@ -5,6 +5,7 @@ Uses FlexAttention with a static block mask: CLS tokens attend globally,
 patch tokens attend to CLS + spatially nearby chunks (Hilbert-ordered).
 """
 
+import logging
 from functools import partial
 
 import torch
@@ -13,6 +14,8 @@ from torch import Tensor
 from torch.nn.attention.flex_attention import flex_attention, BlockMask
 
 from sparse_wsi_vit.models.vit_5.rope import VisionRotaryEmbedding
+
+logger = logging.getLogger(__name__)
 
 compiled_flex_attention = torch.compile(
     partial(flex_attention, kernel_options={"BACKEND": "TRITON"}),
@@ -212,15 +215,42 @@ class StaticSparseAttention(nn.Module):
         batch_size, seq_len, embed_dim = x.shape
         num_cls = self.num_cls
 
+        logger.info(
+            "ATTN INPUT  x: shape=%s dtype=%s device=%s | "
+            "coords: shape=%s device=%s | "
+            "x has_nan=%s has_inf=%s",
+            x.shape, x.dtype, x.device,
+            coords.shape if coords is not None else None,
+            coords.device if coords is not None else None,
+            torch.isnan(x).any().item(), torch.isinf(x).any().item(),
+        )
+
         qkv = self.qkv(x).reshape(batch_size, seq_len, 3, self.num_heads, self.head_dim)
         qkv = qkv.permute(2, 0, 3, 1, 4)  # (3, batch_size, num_heads, seq_len, head_dim)
         q, k, v = qkv.unbind(0)
+
+        logger.info(
+            "QKV  q: shape=%s dtype=%s | q range=[%.4f, %.4f] | "
+            "q has_nan=%s k has_nan=%s v has_nan=%s",
+            q.shape, q.dtype,
+            q.min().item(), q.max().item(),
+            torch.isnan(q).any().item(), torch.isnan(k).any().item(), torch.isnan(v).any().item(),
+        )
 
         if coords is not None:
             q_patch = q[:, :, num_cls:].transpose(1, 2)
             k_patch = k[:, :, num_cls:].transpose(1, 2)
             q = torch.cat([q[:, :, :num_cls], self.rope(q_patch, coords).transpose(1, 2)], dim=2)
             k = torch.cat([k[:, :, :num_cls], self.rope(k_patch, coords).transpose(1, 2)], dim=2)
+            logger.info(
+                "AFTER RoPE  q range=[%.4f, %.4f] | k range=[%.4f, %.4f] | "
+                "q has_nan=%s k has_nan=%s | "
+                "coords range=[%.1f, %.1f]",
+                q.min().item(), q.max().item(),
+                k.min().item(), k.max().item(),
+                torch.isnan(q).any().item(), torch.isnan(k).any().item(),
+                coords.min().item(), coords.max().item(),
+            )
 
         chunk_size = self.chunk_size
         window_size = self.window_size
@@ -233,14 +263,47 @@ class StaticSparseAttention(nn.Module):
             in_window = (q_chunk - kv_chunk).abs() <= window_size
             return q_is_cls | kv_is_cls | in_window
 
+        num_blocks = (seq_len + self.flex_block_size - 1) // self.flex_block_size
+        num_chunks = (seq_len + chunk_size - 1) // chunk_size
+        logger.info(
+            "BLOCK MASK  seq_len=%d num_blocks=%d num_chunks=%d "
+            "chunk_size=%d window_size=%d flex_block_size=%d",
+            seq_len, num_blocks, num_chunks,
+            chunk_size, window_size, self.flex_block_size,
+        )
+
         block_mask = build_block_mask(
             seq_len, num_cls, chunk_size, window_size,
             self.flex_block_size, x.device, mask_mod,
         )
+
+        logger.info(
+            "FLEX ATTN  q: device=%s dtype=%s | k: device=%s | v: device=%s | "
+            "block_mask kv_num_blocks: device=%s shape=%s",
+            q.device, q.dtype, k.device, v.device,
+            block_mask.kv_num_blocks.device, block_mask.kv_num_blocks.shape,
+        )
+
         out = compiled_flex_attention(q, k, v, block_mask=block_mask)
 
+        logger.info(
+            "AFTER flex_attention  out: shape=%s dtype=%s | "
+            "range=[%.4f, %.4f] mean=%.4f | has_nan=%s has_inf=%s",
+            out.shape, out.dtype,
+            out.min().item(), out.max().item(), out.mean().item(),
+            torch.isnan(out).any().item(), torch.isinf(out).any().item(),
+        )
+
         out = out.transpose(1, 2).reshape(batch_size, seq_len, embed_dim)
-        return self.out_proj(out)
+        result = self.out_proj(out)
+
+        logger.info(
+            "ATTN OUTPUT  shape=%s | range=[%.4f, %.4f] | has_nan=%s has_inf=%s",
+            result.shape,
+            result.min().item(), result.max().item(),
+            torch.isnan(result).any().item(), torch.isinf(result).any().item(),
+        )
+        return result
 
 
 class StaticSparseViTBlock(nn.Module):
