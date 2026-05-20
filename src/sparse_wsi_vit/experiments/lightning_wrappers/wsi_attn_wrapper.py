@@ -1,3 +1,4 @@
+import gc
 import time
 
 import torch
@@ -132,6 +133,8 @@ class WSIAttnWrapper(LightningWrapperBase):
         Returns:
             Scalar training loss.
         """
+        gc.collect()
+        torch.cuda.empty_cache()
         self._maybe_crop_batch(batch, self.training_crop_tokens)
 
         t0 = time.perf_counter()
@@ -202,6 +205,8 @@ class WSIAttnWrapper(LightningWrapperBase):
         return self._val_or_test_step(batch, kind="test")
 
     def _val_or_test_step(self, batch: dict[str, Tensor], kind: str = "val") -> Tensor:
+        gc.collect()
+        torch.cuda.empty_cache()
         self._maybe_crop_batch(batch, self.eval_crop_tokens)
 
         t0 = time.perf_counter()
