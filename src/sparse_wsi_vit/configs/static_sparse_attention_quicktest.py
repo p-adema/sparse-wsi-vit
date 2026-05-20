@@ -156,7 +156,7 @@ def get_config() -> ExperimentConfig:
     )
 
     config.scheduler = SchedulerConfig(
-        name="none",
+        name=None,
         warmup_iterations_percentage=0.0,
         total_iterations=TRAINING_ITERATIONS,
         mode="max",
