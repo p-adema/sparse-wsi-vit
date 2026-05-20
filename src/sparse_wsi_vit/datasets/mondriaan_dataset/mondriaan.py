@@ -159,17 +159,28 @@ class MondriaanGenerator:
             target_label = random.randint(0, 1)
 
         if random_colors and object_type == "patterned":
-            # Each object gets its own independently sampled 4-colour pattern.
-            # Mean preservation is intentionally broken: objects have different
-            # per-image means, so ps4 no longer guarantees all objects collapse
-            # to the same token.  The pair in label=1 is still pixel-identical.
             def _rand_pat():
                 return np.random.uniform(0, 1, size=(4, 3)).astype(np.float32)
             if target_label == 1:
+                # Exactly one pair + two distinct singletons.
                 pair_pat = _rand_pat()
                 entries = [(pair_pat, 0), (pair_pat, 0), (_rand_pat(), 1), (_rand_pat(), 2)]
             else:
-                entries = [(_rand_pat(), i) for i in range(4)]
+                # label=0 covers all-distinct, double-pair, triple, and quadruple.
+                # Sampling uniformly forces the model to count all four objects
+                # rather than merely detect any pair.
+                cfg = random.choice(["all_distinct", "double_pair", "triple", "quadruple"])
+                if cfg == "all_distinct":
+                    entries = [(_rand_pat(), i) for i in range(4)]
+                elif cfg == "double_pair":
+                    a, b = _rand_pat(), _rand_pat()
+                    entries = [(a, 0), (a, 0), (b, 1), (b, 1)]
+                elif cfg == "triple":
+                    a = _rand_pat()
+                    entries = [(a, 0), (a, 0), (a, 0), (_rand_pat(), 1)]
+                else:  # quadruple
+                    a = _rand_pat()
+                    entries = [(a, 0), (a, 0), (a, 0), (a, 0)]
             random.shuffle(entries)
             pats, obj_types = zip(*entries)
             obj_types = list(obj_types)
@@ -193,7 +204,22 @@ class MondriaanGenerator:
                 obj_types = [pair, pair] + others
                 random.shuffle(obj_types)
             else:
-                obj_types = random.sample(range(n_types), 4)
+                # label=0: all-distinct, double-pair, triple, or quadruple.
+                cfg = random.choice(["all_distinct", "double_pair", "triple", "quadruple"])
+                if cfg == "all_distinct":
+                    obj_types = random.sample(range(n_types), 4)
+                elif cfg == "double_pair":
+                    a, b = random.sample(range(n_types), 2)
+                    obj_types = [a, a, b, b]
+                    random.shuffle(obj_types)
+                elif cfg == "triple":
+                    a = random.randrange(n_types)
+                    b = random.choice([t for t in range(n_types) if t != a])
+                    obj_types = [a, a, a, b]
+                    random.shuffle(obj_types)
+                else:  # quadruple
+                    a = random.randrange(n_types)
+                    obj_types = [a, a, a, a]
 
             for (y, x), t in zip(positions, obj_types):
                 tl, tr, bl, br = vocab[t]
