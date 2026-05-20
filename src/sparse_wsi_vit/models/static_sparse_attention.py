@@ -197,6 +197,8 @@ class StaticSparseAttention(nn.Module):
             theta=rope_theta,
         )
         self.qkv = nn.Linear(embed_dim, 3 * embed_dim, bias=True)
+        self.q_norm = nn.RMSNorm(self.head_dim)
+        self.k_norm = nn.RMSNorm(self.head_dim)
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=True)
 
     def forward(self, x: Tensor, coords: Tensor | None = None) -> Tensor:
@@ -221,6 +223,9 @@ class StaticSparseAttention(nn.Module):
             k_patch = k[:, :, num_cls:].transpose(1, 2)
             q = torch.cat([q[:, :, :num_cls], self.rope(q_patch, coords).transpose(1, 2)], dim=2)
             k = torch.cat([k[:, :, :num_cls], self.rope(k_patch, coords).transpose(1, 2)], dim=2)
+
+        q = self.q_norm(q)
+        k = self.k_norm(k)
 
         chunk_size = self.chunk_size
         window_size = self.window_size
