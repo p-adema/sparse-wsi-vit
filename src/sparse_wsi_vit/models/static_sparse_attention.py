@@ -199,29 +199,12 @@ class StaticSparseAttention(nn.Module):
         self.qkv = nn.Linear(embed_dim, 3 * embed_dim, bias=True)
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=True)
 
-    def make_mask_mod(self):
-        """Return the fine-grained mask_mod closure for FlexAttention."""
-        num_cls = self.num_cls
-        chunk_size = self.chunk_size
-        window_size = self.window_size
-
-        def mask_mod(b, h, q_idx, kv_idx):
-            q_is_cls = q_idx < num_cls
-            kv_is_cls = kv_idx < num_cls
-            q_chunk = q_idx // chunk_size
-            kv_chunk = kv_idx // chunk_size
-            in_window = (q_chunk - kv_chunk).abs() <= window_size
-            return q_is_cls | kv_is_cls | in_window
-
-        return mask_mod
-
-    def forward(self, x: Tensor, coords: Tensor | None = None, *, block_mask: BlockMask | None = None) -> Tensor:
+    def forward(self, x: Tensor, coords: Tensor | None = None) -> Tensor:
         """Block-sparse attention over a CLS-prepended patch sequence.
 
         Args:
             x: ``(batch_size, num_cls + patch_len, embed_dim)`` — CLS tokens prepended.
             coords: ``(batch_size, patch_len, 2)`` — patch pixel coordinates for 2-D RoPE.
-            block_mask: Pre-built BlockMask. If None, one is constructed on the fly.
 
         Returns:
             ``(batch_size, num_cls + patch_len, embed_dim)``
@@ -239,11 +222,21 @@ class StaticSparseAttention(nn.Module):
             q = torch.cat([q[:, :, :num_cls], self.rope(q_patch, coords).transpose(1, 2)], dim=2)
             k = torch.cat([k[:, :, :num_cls], self.rope(k_patch, coords).transpose(1, 2)], dim=2)
 
-        if block_mask is None:
-            block_mask = build_block_mask(
-                seq_len, num_cls, self.chunk_size, self.window_size,
-                self.flex_block_size, x.device, self.make_mask_mod(),
-            )
+        chunk_size = self.chunk_size
+        window_size = self.window_size
+
+        def mask_mod(b, h, q_idx, kv_idx):
+            q_is_cls = q_idx < num_cls
+            kv_is_cls = kv_idx < num_cls
+            q_chunk = q_idx // chunk_size
+            kv_chunk = kv_idx // chunk_size
+            in_window = (q_chunk - kv_chunk).abs() <= window_size
+            return q_is_cls | kv_is_cls | in_window
+
+        block_mask = build_block_mask(
+            seq_len, num_cls, chunk_size, window_size,
+            self.flex_block_size, x.device, mask_mod,
+        )
         out = compiled_flex_attention(q, k, v, block_mask=block_mask)
 
         out = out.transpose(1, 2).reshape(batch_size, seq_len, embed_dim)
@@ -449,5 +442,5 @@ class StaticSparseAttentionAdapter(nn.Module):
             rope_coord_high=rope_coord_high,
         )
 
-    def forward(self, x: Tensor, coords: Tensor | None = None, **kwargs) -> Tensor:
-        return self.attn(x, coords, **kwargs)
+    def forward(self, x: Tensor, coords: Tensor | None = None) -> Tensor:
+        return self.attn(x, coords)

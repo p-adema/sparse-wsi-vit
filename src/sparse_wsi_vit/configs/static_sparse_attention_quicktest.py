@@ -131,7 +131,7 @@ def get_config() -> ExperimentConfig:
     config.lightning_wrapper_class = LazyConfig(WSIAttnWrapper)(
         use_bce_loss=(OUT_FEATURES == 1),
         training_crop_tokens=None,
-        eval_crop_tokens=None,
+        eval_crop_tokens=50_000,
         compile_mode=None,
         validation_on_cpu=False,
     )
@@ -156,7 +156,7 @@ def get_config() -> ExperimentConfig:
     )
 
     config.scheduler = SchedulerConfig(
-        name="cosine",
+        name="none",
         warmup_iterations_percentage=0.0,
         total_iterations=TRAINING_ITERATIONS,
         mode="max",
