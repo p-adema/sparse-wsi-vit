@@ -81,22 +81,15 @@ def build_block_mask(
         for i, kvb in enumerate(kv_list):
             kv_indices[0, 0, qb, i] = kvb
 
-    # full_* tensors: all-zero num_blocks means "no full tiles", but we pass
-    # real tensors (not None) so the compiled Triton inference kernel never
-    # dereferences a null pointer, which was causing the CUDA illegal memory
-    # access during validation.
-    full_num_blocks = torch.zeros_like(kv_num_blocks)
-    full_indices = torch.zeros(1, 1, num_blocks, 1, dtype=torch.int32, device=device)
-
     return BlockMask(
         kv_num_blocks=kv_num_blocks,
         kv_indices=kv_indices,
-        full_kv_num_blocks=full_num_blocks,
-        full_kv_indices=full_indices,
-        q_num_blocks=kv_num_blocks.clone(),
-        q_indices=kv_indices.clone(),
-        full_q_num_blocks=full_num_blocks.clone(),
-        full_q_indices=full_indices.clone(),
+        full_kv_num_blocks=None,
+        full_kv_indices=None,
+        q_num_blocks=kv_num_blocks,
+        q_indices=kv_indices,
+        full_q_num_blocks=None,
+        full_q_indices=None,
         BLOCK_SIZE=(flex_block_size, flex_block_size),
         mask_mod=mask_mod,
         seq_lengths=(seq_len, seq_len),
@@ -244,9 +237,7 @@ class StaticSparseAttention(nn.Module):
             seq_len, num_cls, chunk_size, window_size,
             self.flex_block_size, x.device, mask_mod,
         )
-        # attn_fn = compiled_flex_attention if self.training else flex_attention
-        attn_fn = compiled_flex_attention
-        out = attn_fn(q, k, v, block_mask=block_mask)
+        out = compiled_flex_attention(q, k, v, block_mask=block_mask)
 
         out = out.transpose(1, 2).reshape(batch_size, seq_len, embed_dim)
         return self.out_proj(out)
