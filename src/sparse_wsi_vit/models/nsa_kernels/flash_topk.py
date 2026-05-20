@@ -255,7 +255,7 @@ class FlashAttnTopKKernel:
             ]
 
         if self._log_smem:
-            print("Debug info about SharedStorage:")
+            print("Debug info about FlashTopK SharedStorage:")
             print("    sQ", cute.cosize(sQ_layout) * 2 / 1024, "KiB")
             print("    sK", cute.cosize(sKV_layout) * 2 / 1024, "KiB")
             print("    sV", cute.cosize(sQ_layout) * 2 / 1024, "KiB")
@@ -1460,14 +1460,6 @@ class FlashTopK(torch.nn.Module):
 
         torch_stream = torch.cuda.current_stream()
         stream = cuda.CUstream(torch_stream.cuda_stream)
-        print("COMPILE CALL:")
-        print(f"\t{q.shape=}")
-        print(f"\t{k.shape=}")
-        print(f"\t{v.shape=}")
-        print(f"\t{o.shape=}")
-        print(f"\t{i.shape=}")
-        print(f"\t{t.shape=}")
-        print(f"\t{lse.shape=}")
         func = cute.compile(kernel, q, k, v, o, i, t, lse, softmax_scale, stream)
 
         @torch.library.custom_op(
