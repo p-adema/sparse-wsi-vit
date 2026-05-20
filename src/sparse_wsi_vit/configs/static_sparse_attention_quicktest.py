@@ -157,7 +157,7 @@ def get_config() -> ExperimentConfig:
 
     config.scheduler = SchedulerConfig(
         name="cosine",
-        warmup_iterations_percentage=0.05,
+        warmup_iterations_percentage=0.0,
         total_iterations=TRAINING_ITERATIONS,
         mode="max",
         patience=999,
