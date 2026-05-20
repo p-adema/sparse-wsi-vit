@@ -168,6 +168,13 @@ class WSIAttnWrapper(LightningWrapperBase):
             )
         return loss
 
+    def on_train_epoch_start(self) -> None:
+        # pray this solves torch.compile memory leak.
+        torch.compiler.reset()
+        torch.cuda.empty_cache()
+        gc.collect()
+        torch.cuda.empty_cache()
+
     def on_train_epoch_end(self) -> None:
         """Log epoch-level training accuracy and reset the accumulator."""
         acc = self.train_acc.compute()
