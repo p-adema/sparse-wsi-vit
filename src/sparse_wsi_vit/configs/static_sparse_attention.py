@@ -149,9 +149,9 @@ def get_config() -> ExperimentConfig:
     config.lightning_wrapper_class = LazyConfig(WSIAttnWrapper)(
         use_bce_loss=(OUT_FEATURES == 1),
         training_crop_tokens=None,
-        eval_crop_tokens=None,
-        compile_mode="max-autotune-no-cudagraphs",
-        validation_on_cpu=True
+        eval_crop_tokens=50_000,
+        compile_mode=None,
+        validation_on_cpu=False,
     )
 
 
@@ -170,11 +170,11 @@ def get_config() -> ExperimentConfig:
         accumulate_grad_steps=ACCUMULATE_GRAD_STEPS,
     )
 
-    # config.trainer = TrainerConfig(
-    #     num_sanity_val_steps=0,
-    #     val_check_interval=1.0
-    # )
-# todo
+    config.trainer = TrainerConfig(
+        num_sanity_val_steps=0,
+        val_check_interval=1.0,
+    )
+
     # Scheduler
     config.scheduler = SchedulerConfig(
         name="cosine",

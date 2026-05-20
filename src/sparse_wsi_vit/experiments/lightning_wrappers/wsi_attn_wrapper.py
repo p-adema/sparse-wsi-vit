@@ -1,4 +1,3 @@
-import gc
 import time
 
 import torch
@@ -133,8 +132,6 @@ class WSIAttnWrapper(LightningWrapperBase):
         Returns:
             Scalar training loss.
         """
-        gc.collect()
-        torch.cuda.empty_cache()
         self._maybe_crop_batch(batch, self.training_crop_tokens)
 
         t0 = time.perf_counter()
@@ -205,8 +202,6 @@ class WSIAttnWrapper(LightningWrapperBase):
         return self._val_or_test_step(batch, kind="test")
 
     def _val_or_test_step(self, batch: dict[str, Tensor], kind: str = "val") -> Tensor:
-        gc.collect()
-        torch.cuda.empty_cache()
         self._maybe_crop_batch(batch, self.eval_crop_tokens)
 
         t0 = time.perf_counter()
@@ -248,7 +243,12 @@ class WSIAttnWrapper(LightningWrapperBase):
         self.val_precision.update(preds_m, labels_m)
         self.val_recall.update(preds_m, labels_m)
         self.val_f1.update(preds_m, labels_m)
-        self.val_auc.update(preds_m, labels_m)
+        logits_for_auc = output_dict["logits"].squeeze(1).to(metric_device)
+        if not self.multiclass and self.use_bce_loss:
+            auc_scores = torch.sigmoid(logits_for_auc)
+        else:
+            auc_scores = logits_for_auc
+        self.val_auc.update(auc_scores, labels_m)
         self.log(
             f"{kind}/loss",
             loss,
