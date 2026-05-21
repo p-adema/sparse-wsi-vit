@@ -14,7 +14,10 @@ from torch.nn.attention.flex_attention import flex_attention, BlockMask
 
 from sparse_wsi_vit.models.vit_5.rope import VisionRotaryEmbedding
 
-_flex_attention = partial(flex_attention, kernel_options={"BACKEND": "TRITON"})
+compiled_flex_attention = torch.compile(
+    partial(flex_attention, kernel_options={"BACKEND": "TRITON"}),
+    dynamic=True,
+)
 
 
 def build_block_mask(
@@ -239,7 +242,7 @@ class StaticSparseAttention(nn.Module):
             seq_len, num_cls, chunk_size, window_size,
             self.flex_block_size, x.device, mask_mod,
         )
-        out = _flex_attention(q, k, v, block_mask=block_mask)
+        out = compiled_flex_attention(q, k, v, block_mask=block_mask)
 
         out = out.transpose(1, 2).reshape(batch_size, seq_len, embed_dim)
         return self.out_proj(out)
