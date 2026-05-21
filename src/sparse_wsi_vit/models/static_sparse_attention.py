@@ -156,9 +156,13 @@ class StaticSparseAttention(nn.Module):
         num_cls = self.num_cls
 
         # --- QKV projection ---
+        # Make QKV contiguous after permute so Q, K, V get standard strides.
+        # Without this, unbind(0) produces views with an interleaved stride
+        # pattern (heads interleaved with QKV components) that causes illegal
+        # memory access in the Triton kernel for certain sequence lengths.
         qkv = self.qkv(x).reshape(batch_size, seq_len, 3, self.num_heads, self.head_dim)
-        qkv = qkv.permute(2, 0, 3, 1, 4)  # (3, batch, heads, seq_len, head_dim)
-        q, k, v = qkv.unbind(0)            # each: (batch, heads, seq_len, head_dim)
+        qkv = qkv.permute(2, 0, 3, 1, 4).contiguous()  # (3, batch, heads, seq_len, head_dim)
+        q, k, v = qkv.unbind(0)  # each: (batch, heads, seq_len, head_dim), contiguous
 
         # --- Apply 2-D RoPE to patch tokens only ---
         if coords is not None:
@@ -175,7 +179,9 @@ class StaticSparseAttention(nn.Module):
         cls_out = F.scaled_dot_product_attention(q_cls, k, v)
 
         # --- Patch attention: block-sparse via Triton kernel ---
-        q_patch = q[:, :, num_cls:]  # (batch, heads, num_patches, head_dim)
+        # q_patch is a slice of q (contiguous after cat, but offset by num_cls).
+        # Make it contiguous so the Triton kernel gets standard strides.
+        q_patch = q[:, :, num_cls:].contiguous()  # (batch, heads, num_patches, head_dim)
         kv_indices = self._get_kv_indices(seq_len, x.device)
         patch_out = block_sparse_attention(
             q_patch, k, v, kv_indices, seq_len, self.block_size,

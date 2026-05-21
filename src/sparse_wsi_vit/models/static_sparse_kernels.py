@@ -324,7 +324,7 @@ def _block_sparse_attn_bwd(
 # ---------------------------------------------------------------------------
 
 class BlockSparseAttentionFunction(torch.autograd.Function):
-    """Block-sparse FlashAttention via Triton."""
+    """Block-sparse FlashAttention via Triton — checkpoint-compatible."""
 
     @staticmethod
     def forward(ctx, q_patch, k, v, kv_indices, seq_len, block_size):
@@ -337,6 +337,11 @@ class BlockSparseAttentionFunction(torch.autograd.Function):
             seq_len:    int  — full sequence length (CLS + patches)
             block_size: int  — Triton tile size
         """
+        # Triton kernels require contiguous tensors for correct stride arithmetic.
+        q_patch = q_patch.contiguous()
+        k = k.contiguous()
+        v = v.contiguous()
+
         batch_size, num_heads, num_patches, head_dim = q_patch.shape
 
         out = torch.empty(
