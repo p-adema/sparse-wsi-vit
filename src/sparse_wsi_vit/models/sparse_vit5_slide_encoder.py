@@ -196,8 +196,9 @@ class SparseViT5SlideEncoder(nn.Module):
 
         for block in self.blocks:
             if self.gradient_checkpointing and self.training:
-                x = _block_attn_half(block, x, coords)
+                attn_fn = partial(_block_attn_half, block)
                 mlp_fn = partial(_block_mlp_half, block)
+                x = checkpoint(attn_fn, x, coords, use_reentrant=False)
                 x = checkpoint(mlp_fn, x, use_reentrant=False)
             else:
                 x = block(x, coords)
