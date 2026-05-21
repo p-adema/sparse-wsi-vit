@@ -23,6 +23,42 @@ logger = logging.getLogger(__name__)
 
 _ENC_VERBOSE_CALLS = 2
 _enc_call_count = 0
+_grad_hooks_registered = False
+
+
+def _make_param_grad_hook(param_name: str):
+    def hook(grad: Tensor) -> None:
+        has_nan = torch.isnan(grad).any()
+        has_inf = torch.isinf(grad).any()
+        if has_nan or has_inf:
+            nan_count = torch.isnan(grad).sum().item()
+            inf_count = torch.isinf(grad).sum().item()
+            logger.error(
+                "GRAD NaN/Inf on param %s | nan=%d inf=%d total=%d shape=%s dtype=%s",
+                param_name, nan_count, inf_count, grad.numel(),
+                tuple(grad.shape), grad.dtype,
+            )
+    return hook
+
+
+def _make_activation_grad_hook(label: str):
+    def hook(grad: Tensor) -> None:
+        has_nan = torch.isnan(grad).any()
+        has_inf = torch.isinf(grad).any()
+        if has_nan or has_inf:
+            nan_count = torch.isnan(grad).sum().item()
+            inf_count = torch.isinf(grad).sum().item()
+            logger.error(
+                "GRAD NaN/Inf at %s | nan=%d inf=%d total=%d shape=%s dtype=%s "
+                "grad_range=[%.6f, %.6f]",
+                label, nan_count, inf_count, grad.numel(),
+                tuple(grad.shape), grad.dtype,
+                grad[~torch.isnan(grad) & ~torch.isinf(grad)].min().item()
+                if (grad.numel() - nan_count - inf_count) > 0 else float('nan'),
+                grad[~torch.isnan(grad) & ~torch.isinf(grad)].max().item()
+                if (grad.numel() - nan_count - inf_count) > 0 else float('nan'),
+            )
+    return hook
 
 
 _SPARSE_ATTN_TYPES = ("static")
@@ -184,10 +220,20 @@ class SparseViT5SlideEncoder(nn.Module):
         Returns:
             Dict with ``"logits"`` key, shape ``(batch_size, out_features)``.
         """
-        global _enc_call_count
+        global _enc_call_count, _grad_hooks_registered
         _enc_call_count += 1
         eid = _enc_call_count
         verbose = eid <= _ENC_VERBOSE_CALLS
+
+        # Register parameter gradient hooks once
+        if not _grad_hooks_registered:
+            _grad_hooks_registered = True
+            for name, param in self.named_parameters():
+                param.register_hook(
+                    _make_param_grad_hook(name)
+                )
+            logger.info("Registered gradient NaN hooks on %d parameters",
+                        sum(1 for _ in self.parameters()))
 
         if x.dim() == 2:
             x = x.unsqueeze(0)
@@ -229,6 +275,11 @@ class SparseViT5SlideEncoder(nn.Module):
             else:
                 x = block(x, coords)
 
+            if x.requires_grad:
+                x.register_hook(
+                    _make_activation_grad_hook(f"[enc {eid}] block[{block_idx}]")
+                )
+
             block_bad = _check_nan(x, f"[enc {eid}] after_block[{block_idx}]")
             bad |= block_bad
             if verbose or block_bad:
@@ -246,6 +297,12 @@ class SparseViT5SlideEncoder(nn.Module):
         cls_pooled = (weights * cls_tokens).sum(dim=1)
 
         logits = self.head(cls_pooled)
+
+        if logits.requires_grad:
+            logits.register_hook(
+                _make_activation_grad_hook(f"[enc {eid}] logits")
+            )
+
         logits_bad = _check_nan(logits, f"[enc {eid}] logits")
         bad |= logits_bad
         if verbose or bad:

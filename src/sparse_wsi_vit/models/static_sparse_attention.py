@@ -336,6 +336,11 @@ class StaticSparseAttention(nn.Module):
 
         out = compiled_flex_attention(q, k, v, block_mask=block_mask)
 
+        if out.requires_grad:
+            out.register_hook(
+                lambda g, _cid=cid: _check_nan(g, f"[{_cid}] GRAD flex_attention_output")
+            )
+
         bad |= _check_nan(out, f"[{cid}] flex_attention_output")
         if verbose or bad:
             logger.info(
@@ -347,6 +352,11 @@ class StaticSparseAttention(nn.Module):
 
         out = out.transpose(1, 2).reshape(batch_size, seq_len, embed_dim)
         result = self.out_proj(out)
+
+        if result.requires_grad:
+            result.register_hook(
+                lambda g, _cid=cid: _check_nan(g, f"[{_cid}] GRAD out_proj_output")
+            )
 
         bad |= _check_nan(result, f"[{cid}] out_proj")
         if verbose or bad:
