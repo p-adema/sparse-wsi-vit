@@ -150,20 +150,20 @@ class AttentionMapCallback(pl.callbacks.Callback):
         num_cls = attn.num_cls
         chunk_size = attn.chunk_size
         window_size = attn.window_size
-        flex_block_size = attn.flex_block_size
+        block_size = attn.block_size
 
-        num_flex_blocks = (seq_len + flex_block_size - 1) // flex_block_size
-        blocks_per_chunk = chunk_size // flex_block_size
+        num_flex_blocks = (seq_len + block_size - 1) // block_size
+        blocks_per_chunk = chunk_size // block_size
         num_chunks = (seq_len + chunk_size - 1) // chunk_size
         num_cls_blocks = (
-            (num_cls + flex_block_size - 1) // flex_block_size
+            (num_cls + block_size - 1) // block_size
             if num_cls > 0
             else 0
         )
 
         mask = np.zeros((num_flex_blocks, num_flex_blocks), dtype=np.float32)
         for qb in range(num_flex_blocks):
-            if qb * flex_block_size < num_cls:
+            if qb * block_size < num_cls:
                 mask[qb, :] = 1.0
                 continue
             for cb in range(num_cls_blocks):

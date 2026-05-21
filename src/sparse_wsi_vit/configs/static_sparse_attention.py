@@ -148,7 +148,7 @@ def get_config() -> ExperimentConfig:
         use_bce_loss=(OUT_FEATURES == 1),
         training_crop_tokens=None,
         eval_crop_tokens=None,
-        compile_mode="max-autotune-no-cudagraphs",
+        compile_mode=None,  # Triton kernels handle their own compilation
     )
 
 

@@ -90,9 +90,6 @@ class WSIAttnWrapper(LightningWrapperBase):
         coords = batch["coords"]
         labels = batch["label"]
 
-        torch._dynamo.mark_dynamic(inputs, 1)
-        torch._dynamo.mark_dynamic(coords, 1)
-
         output_dict = self.network(inputs, coords)
 
         logits = output_dict["logits"].squeeze(1)
