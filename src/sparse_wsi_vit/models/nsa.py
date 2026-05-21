@@ -10,6 +10,8 @@ import torch.nn as nn
 import torch.utils.checkpoint
 from torch.nn.attention.flex_attention import BlockMask, flex_attention, noop_mask
 
+from flash_attn import flash_attn_func
+
 from sparse_wsi_vit.models.nsa_kernels.flash_topk import FlashTopK
 from sparse_wsi_vit.models.vit_5.models_vit5 import RMSNorm, vit_models
 from sparse_wsi_vit.models.vit_5.rope import VisionRotaryEmbedding
@@ -91,7 +93,7 @@ class NativeSparseAttention(nn.Module):
         for requires_grad in (False, True):
             flex = torch.compile(flex_attention, dynamic=True)
 
-            @torch.compiler.disable(reason="autotune crashes")
+            @torch.compiler.disable(reason="autotune crashes", recursive=True)
             def _flex(q, k, v, **kwargs):
                 torch._dynamo.mark_dynamic(q, 2)
                 torch._dynamo.mark_dynamic(k, 2)
@@ -141,7 +143,8 @@ class NativeSparseAttention(nn.Module):
         q_cmp = q.view(B, N_BLK, self.block_size, self.num_heads, head_dim).mean(2)
         k_cmp = k.view(B, N_BLK, self.block_size, self.num_heads, head_dim).mean(2)
         v_cmp = v.view(B, N_BLK, self.block_size, self.num_heads, head_dim).mean(2)
-        o_cmp, idx_cmp, _, _ = self.flash_topk(q_cmp, k_cmp, v_cmp)
+        _, idx_cmp, _, _ = self.flash_topk(q_cmp, k_cmp, v_cmp)
+        o_cmp = flash_attn_func(q, k_cmp, v_cmp)
 
         # [B, H, T, D] -> [B, T, H, D] and back again
         o_sel = self.flex_attn[q.requires_grad](
@@ -152,7 +155,7 @@ class NativeSparseAttention(nn.Module):
         ).transpose(1, 2)  # ty:ignore[unresolved-attribute]
 
         x = (
-            o_cmp.view(B, N_BLK, 1, self.num_heads, head_dim)
+            o_cmp.view(B, N_BLK, self.block_size, self.num_heads, head_dim)
             * g_cmp.view(B, N_BLK, self.block_size, self.num_heads, 1)
             + o_sel.view(B, N_BLK, self.block_size, self.num_heads, head_dim)
             * g_sel.view(B, N_BLK, self.block_size, self.num_heads, 1)
@@ -161,6 +164,7 @@ class NativeSparseAttention(nn.Module):
         x = self.proj_drop(x)
         return x
 
+    @torch.compile(dynamic=True)
     def _topk_to_block_mask(self, idx_cmp: torch.Tensor):
         block_indices = idx_cmp.transpose(1, 2)
         B, H, N_BLK, K = block_indices.shape
@@ -183,7 +187,7 @@ class NativeSparseAttention(nn.Module):
 
         # Trivial empty, all blocks are full blocks
         kv_num_blocks = q_num_blocks = block_indices.new_zeros(B, H, N_BLK)
-        kv_indices = q_indices = block_indices.new_empty((B, H, N_BLK, N_BLK))
+        kv_indices = q_indices = full_kv_indices
 
         seq_lengths = (N_BLK * self.block_size, N_BLK * self.block_size)
         BLOCK_SIZE = (self.block_size, self.block_size)
@@ -205,9 +209,10 @@ class NativeSparseAttention(nn.Module):
 
 
 class _RegpoolVit5(vit_models):
-    def __init__(self, block_size: int = 128, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, block_size: int, embed_dim: int, num_classes: int, **kwargs):
+        super().__init__(embed_dim=embed_dim, num_classes=0, **kwargs)
         self.block_size = block_size
+        self.head = nn.Linear(2 * embed_dim, num_classes)
 
     def forward_features(self, x, coords=None):
         """Don't use CLS, but instead mean-pool over registers like SSA impl."""
@@ -238,7 +243,7 @@ class _RegpoolVit5(vit_models):
                 x = blk(x, coords)
 
         x = self.norm(x)
-        return x[:, 0]
+        return torch.cat((x[:, 0], x[:, : self.reg_token.size(1)].mean(1)), dim=1)
 
 
 class NSAViTSlideEncoder(nn.Module):

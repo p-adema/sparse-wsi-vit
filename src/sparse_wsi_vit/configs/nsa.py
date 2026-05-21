@@ -50,9 +50,9 @@ ROPE_DYNAMIC_HIGH = FEATURES_SCALE * DOWNSCALE_BLOCK
 NSA_TOP_K = 16
 NSA_BLOCK_SIZE = 128
 
-TRAINING_ITERATIONS = 3_000
+TRAINING_ITERATIONS = 5_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 3e-4
 WEIGHT_DECAY = 1e-4
 GRAD_CLIP = 1.0
 ACCUMULATE_GRAD_STEPS = 5
@@ -96,7 +96,7 @@ def get_config() -> ExperimentConfig:
         depth=DEPTH,
         top_k=NSA_TOP_K,
         block_size=NSA_BLOCK_SIZE,
-        rope_reg="partial",
+        rope_reg=False,
     )
 
     # Lightning wrapper mappings
