@@ -281,6 +281,7 @@ class NSAViTSlideEncoder(nn.Module):
             reg_theta=reg_theta,
             qk_norm=qk_norm,
             qkv_bias=qkv_bias,
+            block_size=block_size,
             **vit5_kwargs,
         )
         self.down = nn.Linear(in_features, downproj) if downproj else None
