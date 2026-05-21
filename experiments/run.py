@@ -8,6 +8,7 @@ Usage:
 
 import argparse
 import dataclasses
+import logging
 import os
 from pathlib import Path
 
@@ -74,6 +75,11 @@ def main() -> None:
     7.  Constructing the PyTorch Lightning trainer with appropriate callbacks.
     8.  Executing the training, validation, and testing phases of the experiment.
     """
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    )
+
     # Parse command line arguments
     args = parse_args()
 
