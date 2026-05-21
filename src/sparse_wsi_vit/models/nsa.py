@@ -86,16 +86,19 @@ class NativeSparseAttention(nn.Module):
             m_block_size=kernel_block_m,
             n_block_size=kernel_block_n,
         )
-        flex = torch.compile(flex_attention, dynamic=True)
+        self.top_k = top_k
+        self.flex_attn = {}
+        for requires_grad in (False, True):
+            flex = torch.compile(flex_attention, dynamic=True)
 
-        @torch.compiler.disable(reason="autotune crashes")
-        def _flex(q, k, v, **kwargs):
-            torch._dynamo.mark_dynamic(q, 2)
-            torch._dynamo.mark_dynamic(k, 2)
-            torch._dynamo.mark_dynamic(v, 2)
-            return flex(q, k, v, **kwargs)
+            @torch.compiler.disable(reason="autotune crashes")
+            def _flex(q, k, v, **kwargs):
+                torch._dynamo.mark_dynamic(q, 2)
+                torch._dynamo.mark_dynamic(k, 2)
+                torch._dynamo.mark_dynamic(v, 2)
+                return flex(q, k, v, **kwargs)
 
-        self.flex_attn = _flex
+            self.flex_attn[requires_grad] = _flex
 
     def forward(self, x, coords=None):
         B, N, C = x.shape
@@ -141,7 +144,7 @@ class NativeSparseAttention(nn.Module):
         o_cmp, idx_cmp, _, _ = self.flash_topk(q_cmp, k_cmp, v_cmp)
 
         # [B, H, T, D] -> [B, T, H, D] and back again
-        o_sel = self.flex_attn(
+        o_sel = self.flex_attn[q.requires_grad](
             q.transpose(1, 2),
             k.transpose(1, 2),
             v.transpose(1, 2),

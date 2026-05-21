@@ -1,9 +1,9 @@
 # Requires: nvidia-cutlass-dsl
-from pathlib import Path
 import functools
 import math
 import time
 from collections.abc import Callable
+from pathlib import Path
 from types import SimpleNamespace
 
 import cuda.bindings.driver as cuda
@@ -12,10 +12,8 @@ import cutlass.cute as cute
 import cutlass.pipeline as pipeline
 import cutlass.utils as utils
 import torch.library
-from cutlass import Tensor
 from cutlass.cute.nvgpu import cpasync, warp
 from cutlass.cute.runtime import from_dlpack
-
 from flash_attn.flash_attn_interface import _flash_attn_backward
 
 """
@@ -1622,8 +1620,10 @@ class FlashTopK(torch.nn.Module):
 
         def setup_context(ctx, inputs, output):
             o, _, _, lse = output
-            ctx.qkv = inputs
-            ctx.ol = o, lse
+            q, k, v = inputs
+
+            ctx.qkv = q.detach(), k.detach(), v.detach()
+            ctx.ol = o.detach(), lse.detach()
 
         flash_topk.register_autograd(backward, setup_context=setup_context)
         return flash_topk
