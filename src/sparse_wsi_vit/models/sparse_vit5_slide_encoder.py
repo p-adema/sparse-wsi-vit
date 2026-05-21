@@ -4,6 +4,7 @@ WSI slide encoder using ViT-5 blocks with configurable sparse attention.
 
 from __future__ import annotations
 
+import logging
 from functools import partial
 
 import torch
@@ -15,7 +16,13 @@ from sparse_wsi_vit.models.vit_5.models_vit5 import Block, RMSNorm
 from sparse_wsi_vit.models.static_sparse_attention import (
     StaticSparseAttentionAdapter,
     hilbert_sort,
+    _check_nan,
 )
+
+logger = logging.getLogger(__name__)
+
+_ENC_VERBOSE_CALLS = 2
+_enc_call_count = 0
 
 
 _SPARSE_ATTN_TYPES = ("static")
@@ -177,24 +184,43 @@ class SparseViT5SlideEncoder(nn.Module):
         Returns:
             Dict with ``"logits"`` key, shape ``(batch_size, out_features)``.
         """
+        global _enc_call_count
+        _enc_call_count += 1
+        eid = _enc_call_count
+        verbose = eid <= _ENC_VERBOSE_CALLS
+
         if x.dim() == 2:
             x = x.unsqueeze(0)
         if coords is not None and coords.dim() == 2:
             coords = coords.unsqueeze(0)
 
-        batch_size = x.shape[0]
+        batch_size, patch_len = x.shape[0], x.shape[1]
+        bad = _check_nan(x, f"[enc {eid}] raw_input")
+        if verbose:
+            logger.info(
+                "[enc %d] INPUT shape=%s patches=%d dtype=%s training=%s ckpt=%s",
+                eid, x.shape, patch_len, x.dtype,
+                self.training, self.gradient_checkpointing,
+            )
 
-        x = self.input_proj(x)  # (batch_size, patch_len, embed_dim)
+        x = self.input_proj(x)
+        bad |= _check_nan(x, f"[enc {eid}] after_input_proj")
 
         if coords is not None and self.use_hilbert_sort:
             sort_idx = hilbert_sort(coords)
             x = x.gather(1, sort_idx.unsqueeze(-1).expand_as(x))
             coords = coords.gather(1, sort_idx.unsqueeze(-1).expand(-1, -1, 2))
 
-        cls = self.cls_tokens.expand(batch_size, -1, -1)  # (batch_size, num_cls, embed_dim)
-        x = torch.cat([cls, x], dim=1)                     # (batch_size, num_cls + patch_len, embed_dim)
+        cls = self.cls_tokens.expand(batch_size, -1, -1)
+        x = torch.cat([cls, x], dim=1)
 
-        for block in self.blocks:
+        if verbose:
+            logger.info(
+                "[enc %d] seq_len=%d (cls=%d + patches=%d) embed_dim=%d",
+                eid, x.shape[1], self.num_cls, patch_len, self.embed_dim,
+            )
+
+        for block_idx, block in enumerate(self.blocks):
             if self.gradient_checkpointing and self.training:
                 attn_fn = partial(_block_attn_half, block)
                 mlp_fn = partial(_block_mlp_half, block)
@@ -203,10 +229,32 @@ class SparseViT5SlideEncoder(nn.Module):
             else:
                 x = block(x, coords)
 
+            block_bad = _check_nan(x, f"[enc {eid}] after_block[{block_idx}]")
+            bad |= block_bad
+            if verbose or block_bad:
+                logger.info(
+                    "[enc %d] block[%d] range=[%.4f, %.4f] mean=%.6f nan=%s",
+                    eid, block_idx,
+                    x.min().item(), x.max().item(), x.mean().item(),
+                    block_bad,
+                )
+
         x = self.norm(x)
 
-        cls_tokens = x[:, : self.num_cls]                          # (batch_size, num_cls, embed_dim)
-        weights = torch.softmax(self.cls_pool(cls_tokens), dim=1)  # (batch_size, num_cls, 1)
-        cls_pooled = (weights * cls_tokens).sum(dim=1)             # (batch_size, embed_dim)
+        cls_tokens = x[:, : self.num_cls]
+        weights = torch.softmax(self.cls_pool(cls_tokens), dim=1)
+        cls_pooled = (weights * cls_tokens).sum(dim=1)
 
-        return {"logits": self.head(cls_pooled)}
+        logits = self.head(cls_pooled)
+        logits_bad = _check_nan(logits, f"[enc {eid}] logits")
+        bad |= logits_bad
+        if verbose or bad:
+            logger.info(
+                "[enc %d] OUTPUT logits=%s weights=%s nan=%s",
+                eid,
+                logits.detach().cpu().tolist(),
+                weights.detach().cpu().squeeze(-1).tolist(),
+                logits_bad,
+            )
+
+        return {"logits": logits}

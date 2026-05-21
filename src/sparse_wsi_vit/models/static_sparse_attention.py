@@ -5,6 +5,7 @@ Uses FlexAttention with a static block mask: CLS tokens attend globally,
 patch tokens attend to CLS + spatially nearby chunks (Hilbert-ordered).
 """
 
+import logging
 from functools import partial
 
 import torch
@@ -14,10 +15,30 @@ from torch.nn.attention.flex_attention import flex_attention, BlockMask
 
 from sparse_wsi_vit.models.vit_5.rope import VisionRotaryEmbedding
 
+logger = logging.getLogger(__name__)
+
 compiled_flex_attention = torch.compile(
     partial(flex_attention, kernel_options={"BACKEND": "TRITON"}),
     dynamic=True,
 )
+
+_NAN_VERBOSE_CALLS = 6
+_nan_call_count = 0
+
+
+def _check_nan(tensor: Tensor, label: str) -> bool:
+    has_nan = torch.isnan(tensor).any()
+    has_inf = torch.isinf(tensor).any()
+    if has_nan or has_inf:
+        nan_count = torch.isnan(tensor).sum().item()
+        inf_count = torch.isinf(tensor).sum().item()
+        logger.error(
+            "NaN/Inf at %s | nan=%d inf=%d total=%d shape=%s dtype=%s",
+            label, nan_count, inf_count, tensor.numel(),
+            tuple(tensor.shape), tensor.dtype,
+        )
+        return True
+    return False
 
 
 def build_block_mask(
@@ -72,6 +93,14 @@ def build_block_mask(
         all_kv_lists.append(kv_list)
 
     max_kv = max(len(kv) for kv in all_kv_lists)
+
+    kv_indices_bytes = num_blocks * max_kv * 4
+    logger.info(
+        "build_block_mask: num_blocks=%d max_kv=%d kv_indices=(%d, %d) "
+        "memory=%.1fMB (%.2fGB)",
+        num_blocks, max_kv, num_blocks, max_kv,
+        kv_indices_bytes / 1024**2, kv_indices_bytes / 1024**3,
+    )
 
     kv_num_blocks = torch.zeros(1, 1, num_blocks, dtype=torch.int32, device=device)
     kv_indices = torch.zeros(1, 1, num_blocks, max_kv, dtype=torch.int32, device=device)
@@ -211,21 +240,68 @@ class StaticSparseAttention(nn.Module):
         Returns:
             ``(batch_size, num_cls + patch_len, embed_dim)``
         """
+        global _nan_call_count
+        _nan_call_count += 1
+        cid = _nan_call_count
+        verbose = cid <= _NAN_VERBOSE_CALLS
+
         batch_size, seq_len, embed_dim = x.shape
         num_cls = self.num_cls
 
+        bad = _check_nan(x, f"[{cid}] attn_input")
+        if verbose:
+            logger.info(
+                "[%d] INPUT shape=%s dtype=%s seq_len=%d device=%s",
+                cid, x.shape, x.dtype, seq_len, x.device,
+            )
+
         qkv = self.qkv(x).reshape(batch_size, seq_len, 3, self.num_heads, self.head_dim)
-        qkv = qkv.permute(2, 0, 3, 1, 4)  # (3, batch_size, num_heads, seq_len, head_dim)
+        qkv = qkv.permute(2, 0, 3, 1, 4)
         q, k, v = qkv.unbind(0)
+
+        bad |= _check_nan(q, f"[{cid}] q_pre_rope")
+        bad |= _check_nan(k, f"[{cid}] k_pre_rope")
+        bad |= _check_nan(v, f"[{cid}] v")
+        if verbose:
+            logger.info(
+                "[%d] QKV q_range=[%.4f, %.4f] k_range=[%.4f, %.4f] v_range=[%.4f, %.4f]",
+                cid, q.min().item(), q.max().item(),
+                k.min().item(), k.max().item(),
+                v.min().item(), v.max().item(),
+            )
 
         if coords is not None:
             q_patch = q[:, :, num_cls:].transpose(1, 2)
             k_patch = k[:, :, num_cls:].transpose(1, 2)
-            q = torch.cat([q[:, :, :num_cls], self.rope(q_patch, coords).transpose(1, 2)], dim=2)
-            k = torch.cat([k[:, :, :num_cls], self.rope(k_patch, coords).transpose(1, 2)], dim=2)
+            q_patch_rope = self.rope(q_patch, coords).transpose(1, 2)
+            k_patch_rope = self.rope(k_patch, coords).transpose(1, 2)
+
+            bad |= _check_nan(q_patch_rope, f"[{cid}] q_patch_after_rope")
+            bad |= _check_nan(k_patch_rope, f"[{cid}] k_patch_after_rope")
+
+            q = torch.cat([q[:, :, :num_cls], q_patch_rope], dim=2)
+            k = torch.cat([k[:, :, :num_cls], k_patch_rope], dim=2)
+
+            if verbose:
+                logger.info(
+                    "[%d] RoPE q_range=[%.4f, %.4f] k_range=[%.4f, %.4f] "
+                    "coords_range=[%.1f, %.1f]",
+                    cid, q.min().item(), q.max().item(),
+                    k.min().item(), k.max().item(),
+                    coords.min().item(), coords.max().item(),
+                )
 
         q = self.q_norm(q)
         k = self.k_norm(k)
+
+        bad |= _check_nan(q, f"[{cid}] q_after_qknorm")
+        bad |= _check_nan(k, f"[{cid}] k_after_qknorm")
+        if verbose:
+            logger.info(
+                "[%d] QK-norm q_range=[%.4f, %.4f] k_range=[%.4f, %.4f]",
+                cid, q.min().item(), q.max().item(),
+                k.min().item(), k.max().item(),
+            )
 
         chunk_size = self.chunk_size
         window_size = self.window_size
@@ -242,10 +318,52 @@ class StaticSparseAttention(nn.Module):
             seq_len, num_cls, chunk_size, window_size,
             self.flex_block_size, x.device, mask_mod,
         )
+
+        if verbose:
+            logger.info(
+                "[%d] BlockMask kv_indices_shape=%s kv_num_blocks_max=%d",
+                cid, tuple(block_mask.kv_indices.shape),
+                block_mask.kv_num_blocks.max().item(),
+            )
+
+        if verbose and torch.cuda.is_available():
+            alloc_gb = torch.cuda.memory_allocated() / 1e9
+            reserved_gb = torch.cuda.memory_reserved() / 1e9
+            logger.info(
+                "[%d] GPU before flex_attention: alloc=%.2fGB reserved=%.2fGB",
+                cid, alloc_gb, reserved_gb,
+            )
+
         out = compiled_flex_attention(q, k, v, block_mask=block_mask)
 
+        bad |= _check_nan(out, f"[{cid}] flex_attention_output")
+        if verbose or bad:
+            logger.info(
+                "[%d] AFTER flex_attention range=[%.6f, %.6f] mean=%.6f "
+                "has_nan=%s has_inf=%s",
+                cid, out.min().item(), out.max().item(), out.mean().item(),
+                torch.isnan(out).any().item(), torch.isinf(out).any().item(),
+            )
+
         out = out.transpose(1, 2).reshape(batch_size, seq_len, embed_dim)
-        return self.out_proj(out)
+        result = self.out_proj(out)
+
+        bad |= _check_nan(result, f"[{cid}] out_proj")
+        if verbose or bad:
+            logger.info(
+                "[%d] OUTPUT range=[%.4f, %.4f] has_nan=%s has_inf=%s",
+                cid, result.min().item(), result.max().item(),
+                torch.isnan(result).any().item(), torch.isinf(result).any().item(),
+            )
+
+        if bad and torch.cuda.is_available():
+            logger.error(
+                "[%d] GPU at NaN: alloc=%.2fGB reserved=%.2fGB",
+                cid, torch.cuda.memory_allocated() / 1e9,
+                torch.cuda.memory_reserved() / 1e9,
+            )
+
+        return result
 
 
 class StaticSparseViTBlock(nn.Module):
