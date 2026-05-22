@@ -144,7 +144,9 @@ class NativeSparseAttention(nn.Module):
         k_cmp = k.view(B, N_BLK, self.block_size, self.num_heads, head_dim).mean(2)
         v_cmp = v.view(B, N_BLK, self.block_size, self.num_heads, head_dim).mean(2)
         _, idx_cmp, _, _ = self.flash_topk(q_cmp, k_cmp, v_cmp)
-        o_cmp = flash_attn_func(q, k_cmp, v_cmp)
+        o_cmp = torch.nn.functional.scaled_dot_product_attention(
+            q.transpose(1, 2), k_cmp.transpose(1, 2), v_cmp.transpose(1, 2)
+        ).transpose(1, 2)
 
         # [B, H, T, D] -> [B, T, H, D] and back again
         o_sel = self.flex_attn[q.requires_grad](
