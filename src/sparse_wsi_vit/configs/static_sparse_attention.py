@@ -120,7 +120,7 @@ def get_config() -> ExperimentConfig:
         pin_memory=PIN_MEMORY,
     )
 
-    config.net=LazyConfig(SparseViT5SlideEncoder)(
+    config.net=LazyConfig(StaticSparseViTSlideEncoder)(
         in_features=IN_FEATURES,
         out_features=OUT_FEATURES,
         embed_dim=HIDDEN_SIZE,
