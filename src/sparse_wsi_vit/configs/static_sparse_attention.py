@@ -22,8 +22,8 @@ from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
 from sparse_wsi_vit.models.static_sparse_attention import StaticSparseViTSlideEncoder
 from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import WSIAttnWrapper
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
-from sparse_wsi_vit.experiments.callbacks import AttentionMapCallback
-from sparse_wsi_vit.models.coord_logger import CoordLogger
+# from sparse_wsi_vit.experiments.callbacks import AttentionMapCallback
+# from sparse_wsi_vit.models.coord_logger import CoordLogger
 # PIN_MEMORY = True
 PIN_MEMORY = False
 
@@ -185,8 +185,8 @@ def get_config() -> ExperimentConfig:
         entity="dl2-2026"
     )
 
-    config.callbacks = [
-        LazyConfig(AttentionMapCallback)(every_n_epochs=1, layer_index=-1),
-    ]
+    # config.callbacks = [
+    #     LazyConfig(AttentionMapCallback)(every_n_epochs=1, layer_index=-1),
+    # ]
 
     return config
