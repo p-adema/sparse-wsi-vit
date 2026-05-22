@@ -96,7 +96,7 @@ def get_config() -> ExperimentConfig:
         depth=DEPTH,
         top_k=NSA_TOP_K,
         block_size=NSA_BLOCK_SIZE,
-        rope_reg=False,
+        rope_reg="partial",
     )
 
     # Lightning wrapper mappings

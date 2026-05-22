@@ -213,6 +213,7 @@ class _RegpoolVit5(vit_models):
         super().__init__(embed_dim=embed_dim, num_classes=0, **kwargs)
         self.block_size = block_size
         self.head = nn.Linear(2 * embed_dim, num_classes)
+        self.reg_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
 
     def forward_features(self, x, coords=None):
         """Don't use CLS, but instead mean-pool over registers like SSA impl."""
@@ -222,7 +223,8 @@ class _RegpoolVit5(vit_models):
         B, N, D = x.shape
         x = self.patch_embed(x)
 
-        registers = self.reg_token.expand(B, -1, -1)
+        registers = self.reg_token.expand(B, self.block_size - 1, -1)
+        cls = self.cls_token.expand(B, -1, -1)
 
         if self.pos_embed is not None:
             x = x + self.pos_embed
@@ -231,7 +233,7 @@ class _RegpoolVit5(vit_models):
         x = x[:, : N // self.block_size * self.block_size]
         coords = coords[:, : N // self.block_size * self.block_size]
 
-        x = torch.cat((registers, x), dim=1)
+        x = torch.cat((cls, registers, x), dim=1)
 
         for i, blk in enumerate(self.blocks):
             # print(f"block {i}! {torch.cuda.memory_allocated()/1e9}GB alloc")
@@ -243,7 +245,7 @@ class _RegpoolVit5(vit_models):
                 x = blk(x, coords)
 
         x = self.norm(x)
-        return torch.cat((x[:, 0], x[:, : self.reg_token.size(1)].mean(1)), dim=1)
+        return torch.cat((x[:, 0], x[:, 1 : 1 + self.reg_token.size(1)].mean(1)), dim=1)
 
 
 class NSAViTSlideEncoder(nn.Module):
