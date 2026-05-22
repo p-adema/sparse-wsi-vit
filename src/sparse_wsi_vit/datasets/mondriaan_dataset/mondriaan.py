@@ -158,75 +158,49 @@ class MondriaanGenerator:
         if target_label is None:
             target_label = random.randint(0, 1)
 
-        if random_colors and object_type == "patterned":
-            def _rand_pat():
-                return np.random.uniform(0, 1, size=(4, 3)).astype(np.float32)
-            if target_label == 1:
-                # Exactly one pair + two distinct singletons.
-                pair_pat = _rand_pat()
-                entries = [(pair_pat, 0), (pair_pat, 0), (_rand_pat(), 1), (_rand_pat(), 2)]
+        # Build vocabulary. With random_colors a fresh base palette is sampled
+        # per image: mean preservation holds (each patterned type uses all 4
+        # colours once) so ps4 remains unsolvable, while the matching pair is
+        # still pixel-identical (same permutation × same colours).
+        if random_colors:
+            base = np.random.uniform(0, 1, size=(4, 3)).astype(np.float32)
+            if object_type == "patterned":
+                vocab = [base[list(perm)] for perm in _PATTERNED_PERMS]
             else:
-                # label=0 covers all-distinct, double-pair, triple, and quadruple.
-                # Sampling uniformly forces the model to count all four objects
-                # rather than merely detect any pair.
-                cfg = random.choice(["all_distinct", "double_pair", "triple", "quadruple"])
-                if cfg == "all_distinct":
-                    entries = [(_rand_pat(), i) for i in range(4)]
-                elif cfg == "double_pair":
-                    a, b = _rand_pat(), _rand_pat()
-                    entries = [(a, 0), (a, 0), (b, 1), (b, 1)]
-                elif cfg == "triple":
-                    a = _rand_pat()
-                    entries = [(a, 0), (a, 0), (a, 0), (_rand_pat(), 1)]
-                else:  # quadruple
-                    a = _rand_pat()
-                    entries = [(a, 0), (a, 0), (a, 0), (a, 0)]
-            random.shuffle(entries)
-            pats, obj_types = zip(*entries)
-            obj_types = list(obj_types)
-            for (y, x), (tl, tr, bl, br) in zip(positions, pats):
-                image[y:y+2, x:x+2]     = tl
-                image[y:y+2, x+2:x+4]   = tr
-                image[y+2:y+4, x:x+2]   = bl
-                image[y+2:y+4, x+2:x+4] = br
+                vocab = [np.stack([base[i]] * 4) for i in range(4)]
         else:
-            if random_colors:
-                # solid + random_colors: shared palette, one solid colour per type
-                base = np.random.uniform(0, 1, size=(4, 3)).astype(np.float32)
-                vocab = [[base[i]] * 4 for i in range(4)]
-            else:
-                vocab = PATTERNED_VOCAB if object_type == "patterned" else SOLID_VOCAB
-            n_types = len(vocab)
+            vocab = PATTERNED_VOCAB if object_type == "patterned" else SOLID_VOCAB
+        n_types = len(vocab)
 
-            if target_label == 1:
-                pair = random.randrange(n_types)
-                others = random.sample([t for t in range(n_types) if t != pair], 2)
-                obj_types = [pair, pair] + others
+        if target_label == 1:
+            pair = random.randrange(n_types)
+            others = random.sample([t for t in range(n_types) if t != pair], 2)
+            obj_types = [pair, pair] + others
+            random.shuffle(obj_types)
+        else:
+            # label=0: all-distinct, double-pair, triple, or quadruple.
+            cfg = random.choice(["all_distinct", "double_pair", "triple", "quadruple"])
+            if cfg == "all_distinct":
+                obj_types = random.sample(range(n_types), 4)
+            elif cfg == "double_pair":
+                a, b = random.sample(range(n_types), 2)
+                obj_types = [a, a, b, b]
                 random.shuffle(obj_types)
-            else:
-                # label=0: all-distinct, double-pair, triple, or quadruple.
-                cfg = random.choice(["all_distinct", "double_pair", "triple", "quadruple"])
-                if cfg == "all_distinct":
-                    obj_types = random.sample(range(n_types), 4)
-                elif cfg == "double_pair":
-                    a, b = random.sample(range(n_types), 2)
-                    obj_types = [a, a, b, b]
-                    random.shuffle(obj_types)
-                elif cfg == "triple":
-                    a = random.randrange(n_types)
-                    b = random.choice([t for t in range(n_types) if t != a])
-                    obj_types = [a, a, a, b]
-                    random.shuffle(obj_types)
-                else:  # quadruple
-                    a = random.randrange(n_types)
-                    obj_types = [a, a, a, a]
+            elif cfg == "triple":
+                a = random.randrange(n_types)
+                b = random.choice([t for t in range(n_types) if t != a])
+                obj_types = [a, a, a, b]
+                random.shuffle(obj_types)
+            else:  # quadruple
+                a = random.randrange(n_types)
+                obj_types = [a, a, a, a]
 
-            for (y, x), t in zip(positions, obj_types):
-                tl, tr, bl, br = vocab[t]
-                image[y:y+2, x:x+2]     = tl
-                image[y:y+2, x+2:x+4]   = tr
-                image[y+2:y+4, x:x+2]   = bl
-                image[y+2:y+4, x+2:x+4] = br
+        for (y, x), t in zip(positions, obj_types):
+            tl, tr, bl, br = vocab[t]
+            image[y:y+2, x:x+2]     = tl
+            image[y:y+2, x+2:x+4]   = tr
+            image[y+2:y+4, x:x+2]   = bl
+            image[y+2:y+4, x+2:x+4] = br
 
         # strict label check — same rule as HalliGalli
         counts = Counter(obj_types)
