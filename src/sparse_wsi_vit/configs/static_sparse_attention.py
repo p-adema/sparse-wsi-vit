@@ -29,7 +29,7 @@ PIN_MEMORY = False
 
 # ─── Data Details ──────────────────────────────────────────────
 CSV_TRAIN_FOLD = Path("../splits/tcga-tmb/full")
-TARGET_NAME = "is_tumor"
+TARGET_NAME = "tmb_binary"
 TARGET_OPTIONS = ("TMB-L", "TMB-H")
 FEATURES_DIR = "../tcga-v2"
 DOWNSCALE_BLOCK = int(os.environ.get("DOWNSCALE_BLOCK", 1))
