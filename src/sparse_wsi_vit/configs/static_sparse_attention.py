@@ -27,12 +27,12 @@ from sparse_wsi_vit.models.coord_logger import CoordLogger
 PIN_MEMORY = True
 
 # ─── Data Details ──────────────────────────────────────────────
-CSV_TRAIN_FOLD = Path("../splits/camelyon/full")
-TARGET_NAME = "is_tumor"
-TARGET_OPTIONS = ("normal", "tumor")
-FEATURES_DIR = "../camelyon-emb"
+CSV_TRAIN_FOLD = Path("../splits/tcga-tmb/full")
+TARGET_NAME = "tmb_binary"
+TARGET_OPTIONS = ("TMB-L", "TMB-H")
+FEATURES_DIR = "../tcga-v2"
 DOWNSCALE_BLOCK = int(os.environ.get("DOWNSCALE_BLOCK", 1))
-FEATURES_NAME = "patches"  # "patches" or "cls"
+FEATURES_NAME = os.environ.get("FEATURES_NAME", "patches")  # "patches" or "cls"
 FEATURES_SCALE = int(os.environ.get("FEATURES_SCALE", 224))
 
 train_csv = str(CSV_TRAIN_FOLD / "train.csv")
