@@ -171,7 +171,7 @@ class NativeSparseAttention(nn.Module):
 
         full_dense = block_indices.new_zeros(B, H, N_BLK, N_BLK, dtype=torch.int8)
         torch.diagonal(full_dense, dim1=2, dim2=3).fill_(1)
-        full_dense.scatter_(3, block_indices, 1)
+        full_dense.scatter_(3, block_indices[..., : min(K, N_BLK)], 1)
         reg_blocks = self.num_registers // self.block_size
         full_dense[..., :reg_blocks, :] = 1
         full_dense[..., :, :reg_blocks] = 1
