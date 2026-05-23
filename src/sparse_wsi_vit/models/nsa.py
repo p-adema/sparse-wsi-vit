@@ -233,6 +233,8 @@ class NSAViTSlideEncoder(nn.Module):
         qkv_bias=False,
         rope_reg: bool | str = "partial",
         local_window_size: int = 8,
+        kernel_block_m: int = 64,
+        kernel_block_n: int = 128,
         **vit5_kwargs,  # checkpoint_activations, depth, rope_dynamic_high, num_heads
     ):
         super().__init__()
@@ -254,6 +256,8 @@ class NSAViTSlideEncoder(nn.Module):
                 top_k=top_k,
                 block_size=block_size,
                 local_window_size=local_window_size,
+                kernel_block_n=kernel_block_n,
+                kernel_block_m=kernel_block_m,
             ),
             num_registers=block_size if num_registers is None else num_registers,
             reg_theta=reg_theta,
