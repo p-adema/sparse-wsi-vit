@@ -72,7 +72,7 @@ def construct_trainer(
 
     # Metric to monitor
     if cfg.scheduler.mode == "max":
-        monitor = "val/auc"
+        monitor = "val/f1"
     elif cfg.scheduler.mode == "min":
         monitor = "val/loss"
 
