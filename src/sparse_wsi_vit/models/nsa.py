@@ -154,7 +154,7 @@ class NativeSparseAttention(nn.Module):
             q.transpose(1, 2),
             k.transpose(1, 2),
             v.transpose(1, 2),
-            block_mask=topk_to_block_mask(idx_cmp),
+            block_mask=topk_to_block_mask(idx_cmp, block_size=self.block_size),
         ).transpose(1, 2)  # ty:ignore[unresolved-attribute]
 
         x = (

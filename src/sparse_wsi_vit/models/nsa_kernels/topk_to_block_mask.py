@@ -119,7 +119,11 @@ def _(dense: torch.Tensor):
 
 
 def topk_to_block_mask(
-    idx_cmp: torch.Tensor, self: bool = True, local: int = 4, cls: bool = True
+    idx_cmp: torch.Tensor,
+    self: bool = True,
+    local: int = 4,
+    cls: bool = True,
+    block_size: int = 128,
 ):
     """
     Takes a Top-K asssignment from Flash-Top-K (shaped [B, N_BLK, H, K])
@@ -151,8 +155,8 @@ def topk_to_block_mask(
     kv_num_blocks = q_num_blocks = block_indices.new_zeros(B, H, N_BLK)
     kv_indices = q_indices = full_q_indices
 
-    seq_lengths = (N_BLK * 128, N_BLK * 128)
-    BLOCK_SIZE = (128, 128)
+    seq_lengths = (N_BLK * block_size, N_BLK * block_size)
+    BLOCK_SIZE = (block_size, block_size)
     mask_mod = noop_mask
 
     return BlockMask(
