@@ -13,6 +13,7 @@ from torch.nn.attention.flex_attention import BlockMask, flex_attention, noop_ma
 from flash_attn import flash_attn_func
 
 from sparse_wsi_vit.models.nsa_kernels.flash_topk import FlashTopK
+from sparse_wsi_vit.models.nsa_kernels.topk_to_block_mask import topk_to_block_mask
 from sparse_wsi_vit.models.vit_5.models_vit5 import RMSNorm, vit_models
 from sparse_wsi_vit.models.vit_5.rope import VisionRotaryEmbedding
 
@@ -153,7 +154,7 @@ class NativeSparseAttention(nn.Module):
             q.transpose(1, 2),
             k.transpose(1, 2),
             v.transpose(1, 2),
-            block_mask=self._topk_to_block_mask(idx_cmp),
+            block_mask=topk_to_block_mask(idx_cmp),
         ).transpose(1, 2)  # ty:ignore[unresolved-attribute]
 
         x = (
@@ -166,49 +167,6 @@ class NativeSparseAttention(nn.Module):
         x = self.proj_drop(x)
         return x
 
-    @torch.compile(dynamic=True)
-    def _topk_to_block_mask(self, idx_cmp: torch.Tensor):
-        block_indices = idx_cmp.transpose(1, 2)
-        B, H, N_BLK, K = block_indices.shape
-
-        full_dense = block_indices.new_zeros(B, H, N_BLK, N_BLK, dtype=torch.int8)
-        torch.diagonal(full_dense, dim1=2, dim2=3).fill_(1)
-        full_dense.scatter_(3, block_indices[..., : min(K, N_BLK)], 1)
-        reg_blocks = self.num_registers // self.block_size
-        full_dense[..., :reg_blocks, :] = 1
-        full_dense[..., :, :reg_blocks] = 1
-
-        full_kv_num_blocks = full_dense.sum(-1, dtype=torch.int32)
-        full_kv_indices = full_dense.argsort(dim=-1, descending=True, stable=True)
-        full_kv_indices = full_kv_indices.to(torch.int32)
-
-        full_dense.transpose_(-1, -2)
-        full_q_num_blocks = full_dense.sum(-1, dtype=torch.int32)
-        full_q_indices = full_dense.argsort(dim=-1, descending=True, stable=True)
-        full_q_indices = full_q_indices.to(torch.int32)
-
-        # Trivial empty, all blocks are full blocks
-        kv_num_blocks = q_num_blocks = block_indices.new_zeros(B, H, N_BLK)
-        kv_indices = q_indices = full_kv_indices
-
-        seq_lengths = (N_BLK * self.block_size, N_BLK * self.block_size)
-        BLOCK_SIZE = (self.block_size, self.block_size)
-        mask_mod = noop_mask
-
-        return BlockMask(
-            seq_lengths,
-            kv_num_blocks,
-            kv_indices,
-            full_kv_num_blocks,
-            full_kv_indices,
-            q_num_blocks,
-            q_indices,
-            full_q_num_blocks,
-            full_q_indices,
-            BLOCK_SIZE,
-            mask_mod,
-        )
-
 
 class _RegpoolVit5(vit_models):
     def __init__(self, block_size: int, embed_dim: int, num_classes: int, **kwargs):
@@ -218,7 +176,6 @@ class _RegpoolVit5(vit_models):
         self.reg_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
 
     def forward_features(self, x, coords=None):
-        """Don't use CLS, but instead mean-pool over registers like SSA impl."""
         assert coords is not None
         assert self.reg_token is not None
 
