@@ -49,6 +49,7 @@ ROPE_DYNAMIC_HIGH = FEATURES_SCALE * DOWNSCALE_BLOCK
 
 NSA_TOP_K = 16
 NSA_BLOCK_SIZE = 128
+NSA_LOCAL_WINDOW_SIZE = 8
 
 TRAINING_ITERATIONS = 5_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
@@ -96,6 +97,7 @@ def get_config() -> ExperimentConfig:
         depth=DEPTH,
         top_k=NSA_TOP_K,
         block_size=NSA_BLOCK_SIZE,
+        local_window_size=NSA_LOCAL_WINDOW_SIZE,
         rope_reg="partial",
     )
 

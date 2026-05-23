@@ -2,6 +2,8 @@
 Approach C: Native Sparse Attention (NSA) for WSI slide encoding.
 """
 
+from sparse_wsi_vit.models.hilbert_sort import hilbert_sort
+
 import functools
 import math
 
@@ -41,6 +43,7 @@ class NativeSparseAttention(nn.Module):
         block_size: int = 128,
         kernel_block_m: int = 64,
         kernel_block_n: int = 128,
+        local_window_size: int = 8,
     ):
         super().__init__()
         self.num_heads = num_heads
@@ -72,6 +75,7 @@ class NativeSparseAttention(nn.Module):
         )
         self.rope_reg_size = rope_reg_size
         self.block_size = block_size
+        self.local_window_size = local_window_size
 
         self.qk_norm = qk_norm
         if qk_norm:
@@ -154,7 +158,9 @@ class NativeSparseAttention(nn.Module):
             q.transpose(1, 2),
             k.transpose(1, 2),
             v.transpose(1, 2),
-            block_mask=topk_to_block_mask(idx_cmp, block_size=self.block_size),
+            block_mask=topk_to_block_mask(
+                idx_cmp, block_size=self.block_size, local=self.local_window_size
+            ),
         ).transpose(1, 2)  # ty:ignore[unresolved-attribute]
 
         x = (
@@ -181,6 +187,10 @@ class _RegpoolVit5(vit_models):
 
         B, N, D = x.shape
         x = self.patch_embed(x)
+
+        sort_idx = hilbert_sort(coords)
+        x = x.gather(1, sort_idx.unsqueeze(-1).expand_as(x))
+        coords = coords.gather(1, sort_idx.unsqueeze(-1).expand(-1, -1, 2))
 
         registers = self.reg_token.expand(B, self.block_size - 1, -1)
         cls = self.cls_token.expand(B, -1, -1)
@@ -222,6 +232,7 @@ class NSAViTSlideEncoder(nn.Module):
         qk_norm=True,
         qkv_bias=False,
         rope_reg: bool | str = "partial",
+        local_window_size: int = 8,
         **vit5_kwargs,  # checkpoint_activations, depth, rope_dynamic_high, num_heads
     ):
         super().__init__()
@@ -242,6 +253,7 @@ class NSAViTSlideEncoder(nn.Module):
                 NativeSparseAttention,
                 top_k=top_k,
                 block_size=block_size,
+                local_window_size=local_window_size,
             ),
             num_registers=block_size if num_registers is None else num_registers,
             reg_theta=reg_theta,
