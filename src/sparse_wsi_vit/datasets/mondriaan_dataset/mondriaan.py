@@ -1,32 +1,16 @@
-"""Mondriaan: a synthetic benchmark for pixel-level pattern reasoning.
+"""Mondriaan: a synthetic benchmark for testing pairwise global-dependencies
+*and* pixel-level pattern reasoning.
 
-Four key objects are placed at random 2×2-aligned positions in a 64×64
-black image. Each object is a 2×2 pixel block. The global binary label is
-1 when exactly two of the four objects share the same colour arrangement
-(one matching pair, the other two distinct). Label=0 when all four are
-distinct.
+Four 4×4-pixel objects placed at random positions in a 32×32 black image.
+Label=1 when exactly one matching pair exists among the four objects;
+label=0 when all four are distinct.
 
-Design properties
------------------
-- All patterned object types use the same four base colours exactly once
-  per 2×2 block. Any weighted average (ABMIL) or local pool (HIPT) of an
-  object's four pixels collapses to the same grey vector (0.5, 0.5, 0.5)
-  regardless of type. Pooling-based aggregation is provably uninformative.
-- Patterned vocabulary: 6 arrangements with pairwise Hamming distance ≥ 3,
-  so a model must read at least 3 of the 4 pixels to distinguish any pair.
-- Solid-colour control: 4 types (one solid colour each). Mean colour IS
-  discriminative here, so ABMIL and TransMIL succeed — confirming that
-  failure on the patterned task is specifically due to pooling destroying
-  arrangement information, not a general modelling failure.
+With random_colors=True (used in experiments): each object independently
+samples 4 random RGB colors from Uniform([0,1]³). The matching pair in
+label=1 is pixel-identical. Solid-color control (object_type="solid"):
+each object is one solid random color; mean color IS discriminative.
 
-Resolution ablation
--------------------
-Average-pooling the 64×64 image to 32×32 (one 2×2 block → one token)
-makes the task information-theoretically unsolvable: every object becomes
-a single grey token before the model sees it. This is the ablation that
-shows pixel-level resolution is necessary.
-
-Usage
+Usage (visualization)--See extract_mondriaan.py for (large-scale) data extraction.
 -----
     uv run src/sparse_wsi_vit/datasets/mondriaan_dataset/mondriaan.py \\
         --visualize --n_samples 4
