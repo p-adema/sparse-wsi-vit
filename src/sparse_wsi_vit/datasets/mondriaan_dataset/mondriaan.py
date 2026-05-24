@@ -1,32 +1,16 @@
-"""Mondriaan: a synthetic benchmark for pixel-level pattern reasoning.
+"""Mondriaan: a synthetic benchmark for testing pairwise global-dependencies
+*and* pixel-level pattern reasoning.
 
-Four key objects are placed at random 2×2-aligned positions in a 64×64
-black image. Each object is a 2×2 pixel block. The global binary label is
-1 when exactly two of the four objects share the same colour arrangement
-(one matching pair, the other two distinct). Label=0 when all four are
-distinct.
+Four 4×4-pixel objects placed at random positions in a 32×32 black image.
+Label=1 when exactly one matching pair exists among the four objects;
+label=0 when all four are distinct.
 
-Design properties
------------------
-- All patterned object types use the same four base colours exactly once
-  per 2×2 block. Any weighted average (ABMIL) or local pool (HIPT) of an
-  object's four pixels collapses to the same grey vector (0.5, 0.5, 0.5)
-  regardless of type. Pooling-based aggregation is provably uninformative.
-- Patterned vocabulary: 6 arrangements with pairwise Hamming distance ≥ 3,
-  so a model must read at least 3 of the 4 pixels to distinguish any pair.
-- Solid-colour control: 4 types (one solid colour each). Mean colour IS
-  discriminative here, so ABMIL and TransMIL succeed — confirming that
-  failure on the patterned task is specifically due to pooling destroying
-  arrangement information, not a general modelling failure.
+With random_colors=True (used in experiments): each object independently
+samples 4 random RGB colors from Uniform([0,1]³). The matching pair in
+label=1 is pixel-identical. Solid-color control (object_type="solid"):
+each object is one solid random color; mean color IS discriminative.
 
-Resolution ablation
--------------------
-Average-pooling the 64×64 image to 32×32 (one 2×2 block → one token)
-makes the task information-theoretically unsolvable: every object becomes
-a single grey token before the model sees it. This is the ablation that
-shows pixel-level resolution is necessary.
-
-Usage
+Usage (visualization)--See extract_mondriaan.py for (large-scale) data extraction.
 -----
     uv run src/sparse_wsi_vit/datasets/mondriaan_dataset/mondriaan.py \\
         --visualize --n_samples 4
@@ -37,7 +21,7 @@ from collections import Counter
 
 import numpy as np
 
-# ── base colours ──────────────────────────────────────────────────────────────
+# ── fixed base colors (used when random_colors=False) ───────────────────────
 # Mean of {RED, CYAN, GREEN, MAGENTA} = (0.5, 0.5, 0.5) under any permutation.
 RED     = np.array([1.0, 0.0, 0.0], dtype=np.float32)
 CYAN    = np.array([0.0, 1.0, 1.0], dtype=np.float32)
@@ -46,7 +30,7 @@ MAGENTA = np.array([1.0, 0.0, 1.0], dtype=np.float32)
 
 _R, _C, _G, _M = RED, CYAN, GREEN, MAGENTA
 
-# ── patterned vocabulary ──────────────────────────────────────────────────────
+# ── patterned vocabulary (fixed-color mode) ──────────────────────────────────
 # 6 permutations of {R,C,G,M}; pixel order is [TL, TR, BL, BR].
 # All pairwise Hamming distances are 3 or 4 (verified exhaustively).
 PATTERNED_VOCAB = [
@@ -61,8 +45,21 @@ PATTERNED_NAMES = [
     "RC/GM", "CR/MG", "GM/RC", "MG/CR", "RG/MC", "CM/GR",
 ]
 
-# ── solid-colour control vocabulary ──────────────────────────────────────────
-# Mean colour IS discriminative (label=1 biases the mean; label=0 is grey).
+# ── permutation indices shared between fixed and random-color modes ──────────
+# These define the 6 arrangement types as index permutations of [c0,c1,c2,c3].
+# Hamming distance ≥ 3 between any two rows (property of the permutations,
+# independent of the specific colors chosen).
+_PATTERNED_PERMS = [
+    [0, 1, 2, 3],
+    [1, 0, 3, 2],
+    [2, 3, 0, 1],
+    [3, 2, 1, 0],
+    [0, 2, 3, 1],
+    [1, 3, 2, 0],
+]
+
+# ── solid-colour control vocabulary (fixed-colour mode) ───────────────────────
+# Mean color IS discriminative (label=1 biases the mean; label=0 is grey).
 SOLID_VOCAB = [
     [_R, _R, _R, _R],  # 0 – solid red
     [_C, _C, _C, _C],  # 1 – solid cyan
@@ -109,6 +106,7 @@ class MondriaanGenerator:
         object_type: str = "patterned",
         target_label: int | None = None,
         min_sep: int = 16,
+        random_colors: bool = False,
     ):
         """Generate one Mondriaan sample.
 
@@ -123,6 +121,8 @@ class MondriaanGenerator:
             Force label to 0 or 1. None → chosen uniformly at random.
         min_sep:
             Minimum Euclidean distance between object top-left corners (px).
+        random_colors:
+            If True, sample 4 colors uniformly from [0,1]^3 per image.
 
         Returns
         -------
@@ -131,30 +131,50 @@ class MondriaanGenerator:
         obj_types : list[int], indices into the vocabulary (length 4)
         positions : list[tuple[int, int]], top-left (y, x) corners (length 4)
         """
-        vocab = PATTERNED_VOCAB if object_type == "patterned" else SOLID_VOCAB
-        n_types = len(vocab)
-
         image = np.zeros((image_size, image_size, 3), dtype=np.float32)
         positions = MondriaanGenerator._random_positions(image_size, 4, min_sep)
 
         if target_label is None:
             target_label = random.randint(0, 1)
 
-        if target_label == 1:
-            pair = random.randrange(n_types)
-            others = random.sample([t for t in range(n_types) if t != pair], 2)
-            obj_types = [pair, pair] + others
-            random.shuffle(obj_types)
+        if random_colors and object_type == "patterned":
+            def _rand_pat():
+                return np.random.uniform(0, 1, size=(4, 3)).astype(np.float32)
+            if target_label == 1:
+                pair_pat = _rand_pat()
+                entries = [(pair_pat, 0), (pair_pat, 0), (_rand_pat(), 1), (_rand_pat(), 2)]
+            else:
+                entries = [(_rand_pat(), i) for i in range(4)]
+            random.shuffle(entries)
+            pats, obj_types = zip(*entries)
+            obj_types = list(obj_types)
+            for (y, x), (tl, tr, bl, br) in zip(positions, pats):
+                image[y:y+2, x:x+2]     = tl
+                image[y:y+2, x+2:x+4]   = tr
+                image[y+2:y+4, x:x+2]   = bl
+                image[y+2:y+4, x+2:x+4] = br
         else:
-            obj_types = random.sample(range(n_types), 4)
+            if random_colors:
+                base = np.random.uniform(0, 1, size=(4, 3)).astype(np.float32)
+                vocab = [[base[i]] * 4 for i in range(4)]
+            else:
+                vocab = PATTERNED_VOCAB if object_type == "patterned" else SOLID_VOCAB
+            n_types = len(vocab)
 
-        for (y, x), t in zip(positions, obj_types):
-            tl, tr, bl, br = vocab[t]
-            # each colour fills a 2×2 quadrant within the 4×4 object
-            image[y:y+2, x:x+2] = tl    # top-left quadrant
-            image[y:y+2, x+2:x+4] = tr  # top-right quadrant
-            image[y+2:y+4, x:x+2] = bl  # bottom-left quadrant
-            image[y+2:y+4, x+2:x+4] = br  # bottom-right quadrant
+            if target_label == 1:
+                pair = random.randrange(n_types)
+                others = random.sample([t for t in range(n_types) if t != pair], 2)
+                obj_types = [pair, pair] + others
+                random.shuffle(obj_types)
+            else:
+                obj_types = random.sample(range(n_types), 4)
+
+            for (y, x), t in zip(positions, obj_types):
+                tl, tr, bl, br = vocab[t]
+                image[y:y+2, x:x+2]     = tl
+                image[y:y+2, x+2:x+4]   = tr
+                image[y+2:y+4, x:x+2]   = bl
+                image[y+2:y+4, x+2:x+4] = br
 
         # strict label check — same rule as HalliGalli
         counts = Counter(obj_types)
@@ -266,6 +286,8 @@ if __name__ == "__main__":
         "--object_type", choices=["patterned", "solid"], default="patterned",
     )
     parser.add_argument("--min_sep", type=int, default=8)
+    parser.add_argument("--random_colors", action="store_true",
+                        help="Sample 4 random colours per image instead of fixed {R,C,G,M}.")
     parser.add_argument("--visualize", action="store_true")
     parser.add_argument("--n_samples", type=int, default=4)
     parser.add_argument("--image_only", action="store_true",
@@ -285,12 +307,14 @@ if __name__ == "__main__":
             zoom=args.zoom,
             image_size=args.image_size,
             min_sep=args.min_sep,
+            random_colors=args.random_colors,
         )
     else:
         img, lbl, types, pos = MondriaanGenerator.generate_single(
             image_size=args.image_size,
             object_type=args.object_type,
             min_sep=args.min_sep,
+            random_colors=args.random_colors,
         )
         names = PATTERNED_NAMES if args.object_type == "patterned" else SOLID_NAMES
         print(f"label={lbl}  types={[names[t] for t in types]}  positions={pos}")

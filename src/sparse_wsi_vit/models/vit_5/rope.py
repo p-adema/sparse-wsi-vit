@@ -79,28 +79,30 @@ class VisionRotaryEmbedding(nn.Module):
             freqs = repeat(freqs, "... n -> ... (n r)", r=2)  # 14*32
             freqs = broadcat((freqs[:, None, :], freqs[None, :, :]), dim=-1)  # 14*14*64
         else:
-            # Dynamic image with coordinates for all tokens
+            # Dynamic image with coordinates for all tokens — supports B >= 1.
+            # The original broadcat((freqs_x[:, None, :], freqs_y[None, :, :]))
+            # only works for B=1: for B>1 it outer-products the batch dim,
+            # producing (B, B, N, d) instead of (B, 1, N, d).
+            # Fix: cat x/y freqs directly → (B, N, head_dim), unsqueeze for heads.
             if coords.ndim != 3:
                 raise ValueError(f"Expected {coords.shape=} to be (B, L, 2)")
 
-            t_x = coords[..., 0] / self.coord_high
-            t_y = coords[..., 1] / self.coord_high
+            t_x = coords[..., 0] / self.coord_high  # (B, N)
+            t_y = coords[..., 1] / self.coord_high  # (B, N)
 
-            freqs_x = torch.einsum("..., f -> ... f", t_x, self.freqs)
-            freqs_x = repeat(freqs_x, "... n -> ... (n r)", r=2)
-            freqs_y = torch.einsum("..., f -> ... f", t_y, self.freqs)
-            freqs_y = repeat(freqs_y, "... n -> ... (n r)", r=2)
-            freqs = broadcat((freqs_x[:, None, :], freqs_y[None, :, :]), dim=-1)
+            freqs_x = torch.einsum("..., f -> ... f", t_x, self.freqs)  # (B, N, dim//2)
+            freqs_x = repeat(freqs_x, "... n -> ... (n r)", r=2)         # (B, N, dim)
+            freqs_y = torch.einsum("..., f -> ... f", t_y, self.freqs)  # (B, N, dim//2)
+            freqs_y = repeat(freqs_y, "... n -> ... (n r)", r=2)         # (B, N, dim)
+            freqs = torch.cat([freqs_x, freqs_y], dim=-1)                # (B, N, head_dim)
+
+            freqs_cos = freqs.cos().unsqueeze(2)  # (B, N, 1, head_dim) — broadcasts over heads
+            freqs_sin = freqs.sin().unsqueeze(2)
+            return x * freqs_cos + rotate_half(x) * freqs_sin
 
         freqs_cos = freqs.cos().view(-1, 1, freqs.shape[-1])
         freqs_sin = freqs.sin().view(-1, 1, freqs.shape[-1])
         res = x * freqs_cos + rotate_half(x) * freqs_sin
-
-        # for reference, these are the shapes for 62936 tokens of 8x160=1280 dim:
-        #    x.shape=torch.Size([1, 62936, 8, 160]) coords.shape=torch.Size([1, 62936, 2])
-        #    t_x.shape=torch.Size([1, 62936]) freqs_x.shape=torch.Size([1, 62936, 80])
-        #    freqs.shape=torch.Size([1, 1, 62936, 160]) freqs_cos.shape=torch.Size([62936, 1, 160])
-        #    res.shape=torch.Size([1, 62936, 8, 160])
         return res
 
 

@@ -52,6 +52,15 @@ from tqdm import tqdm
 
 from sparse_wsi_vit.datasets.mondriaan_dataset.mondriaan import MondriaanGenerator
 
+# Background pixels are (0,0,0). Replacing them with this sentinel keeps N fixed
+# at image_size² while making all tokens non-zero, so the softmax denominator is
+# not dominated by background-to-background attention.  The value -1 is outside
+# the [0,1] RGB range and is immediately distinguishable through the linear
+# projection.  Mean-preservation for patterned objects is unaffected (all
+# background tokens are identical, so their contribution to any weighted average
+# is label-invariant).
+BACKGROUND_SENTINEL = -1.0
+
 
 def _extract_split(
     split: str,
@@ -61,6 +70,7 @@ def _extract_split(
     min_sep: int,
     pool_size: int,
     output_dir: Path,
+    random_colors: bool = False,
 ):
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -70,6 +80,7 @@ def _extract_split(
             object_type=object_type,
             target_label=idx % 2,   # balanced labels within each split
             min_sep=min_sep,
+            random_colors=random_colors,
         )
 
         if pool_size == 1:
@@ -92,6 +103,10 @@ def _extract_split(
                 [xs.ravel() * pool_size, ys.ravel() * pool_size], axis=1
             )                                                    # (N, 2) x,y
 
+        # Replace black background tokens with sentinel so all N tokens are non-zero.
+        background = (features == 0).all(axis=1)
+        features[background] = BACKGROUND_SENTINEL
+
         fname = output_dir / f"{split}_{idx:06d}_label{label}.h5"
         with h5py.File(fname, "w") as hf:
             hf.create_dataset("features", data=features.astype(np.float32),
@@ -112,6 +127,8 @@ def main():
     parser.add_argument("--min_sep",     type=int,  default=8)
     parser.add_argument("--pool_size",   type=int,  default=1,
                         help="Spatial pooling before saving (1=pixel, 2=quadrant-level, 4=object-level).")
+    parser.add_argument("--random_colors", action="store_true",
+                        help="Sample 4 random colours per image instead of fixed {R,C,G,M}.")
     args = parser.parse_args()
 
     if args.image_size % args.pool_size != 0:
@@ -120,15 +137,17 @@ def main():
         )
 
     metadata = {
-        "train_size":  args.train_size,
-        "val_size":    args.val_size,
-        "test_size":   args.test_size,
-        "image_size":  args.image_size,
-        "object_type": args.object_type,
-        "min_sep":     args.min_sep,
-        "pool_size":   args.pool_size,
-        "n_tokens":    (args.image_size // args.pool_size) ** 2,
-        "feature_dim": 3,
+        "train_size":    args.train_size,
+        "val_size":      args.val_size,
+        "test_size":     args.test_size,
+        "image_size":    args.image_size,
+        "object_type":   args.object_type,
+        "min_sep":       args.min_sep,
+        "pool_size":     args.pool_size,
+        "random_colors": args.random_colors,
+        "n_tokens":           (args.image_size // args.pool_size) ** 2,
+        "feature_dim":        3,
+        "background_sentinel": BACKGROUND_SENTINEL,
     }
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))
@@ -148,6 +167,7 @@ def main():
             min_sep=args.min_sep,
             pool_size=args.pool_size,
             output_dir=args.output_dir,
+            random_colors=args.random_colors,
         )
 
     print("\nDone.")

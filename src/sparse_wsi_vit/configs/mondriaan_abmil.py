@@ -1,11 +1,14 @@
-"""HIPT on pre-extracted ShapePatchCNN features from HalliGalli synthetic images.
+"""ABMIL on raw RGB pixel features from the Mondriaan synthetic benchmark.
 
-ShapePatchCNN (256-dim embedding) is trained from scratch on the HalliGalli
-shape vocabulary and used as a frozen patch encoder.
-Features are pre-extracted by extract_halligalli.py.
+Input: 1024 raw pixels (32×32 image, pool_size=1), each a 3-dim RGB vector.
+input_proj_dim=256 projects 3→256 before the attention head.
+
+Expected result: ~50% accuracy (chance) on patterned — pooling destroys
+arrangement information; the weighted mean is always grey regardless of label.
 
 Usage:
-    uv run experiments/run.py --config src/sparse_wsi_vit/configs/halligalli_hipt.py
+    MONDRIAAN_DATA_DIR=<path/to/patterned_ps1> \\
+    uv run experiments/run.py --config src/sparse_wsi_vit/configs/mondriaan_abmil.py
 """
 
 import os
@@ -18,18 +21,18 @@ from sparse_wsi_vit.experiments.default_cfg import (
     WandbConfig,
 )
 from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
-from sparse_wsi_vit.models.hipt import HIPT_None_FC
+from sparse_wsi_vit.models.abmil import ABMIL
 from sparse_wsi_vit.experiments.lightning_wrappers.mil_wrapper import MILWrapper
-from sparse_wsi_vit.experiments.datamodules.halligalli_h5_datamodule import HalliGalliH5DataModule
+from sparse_wsi_vit.experiments.datamodules.mondriaan_h5_datamodule import MondriaanH5DataModule
 
 # ─── Data ────────────────────────────────────────────────────────────────────
-DATA_DIR     = os.environ["HALLIGALLI_DATA_DIR"]
-IN_FEATURES  = 256    # ShapePatchCNN embed_dim
+DATA_DIR     = os.environ["MONDRIAAN_DATA_DIR"]
+IN_FEATURES  = 3      # raw RGB pixels
 OUT_FEATURES = 2      # binary, CrossEntropy
 
 # ─── Optimisation ────────────────────────────────────────────────────────────
-BATCH_SIZE    = 1     # standard for MIL bags
-NUM_WORKERS   = 16
+BATCH_SIZE    = 256   # no attention matrix — memory linear in batch; GPU was at 2% before
+NUM_WORKERS   = 4
 PRECISION     = "bf16-mixed"
 
 TRAINING_ITERATIONS          = 10_000
@@ -37,7 +40,7 @@ WARMUP_ITERATIONS_PERCENTAGE = 0.05
 LEARNING_RATE                = 2e-4
 WEIGHT_DECAY                 = 1e-4
 GRAD_CLIP                    = 1.0
-ACCUMULATE_GRAD_STEPS        = 8     # effective batch size = 8
+ACCUMULATE_GRAD_STEPS        = 1
 
 
 def get_config() -> ExperimentConfig:
@@ -45,18 +48,19 @@ def get_config() -> ExperimentConfig:
     config.debug = False
     config.seed  = 42
 
-    config.dataset = LazyConfig(HalliGalliH5DataModule)(
+    config.dataset = LazyConfig(MondriaanH5DataModule)(
         data_dir=DATA_DIR,
         in_features=IN_FEATURES,
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
     )
 
-    config.net = LazyConfig(HIPT_None_FC)(
+    config.net = LazyConfig(ABMIL)(
         in_features=IN_FEATURES,
-        size_arg="big",
+        input_proj_dim=256,
+        hidden_dim=256,
         out_features=OUT_FEATURES,
-        #1.7M parameters
+        num_branches=1,
     )
 
     config.lightning_wrapper_class = LazyConfig(MILWrapper)(
@@ -85,7 +89,7 @@ def get_config() -> ExperimentConfig:
 
     config.wandb = WandbConfig(
         project="wsi-classification",
-        job_group="halligalli_hipt_randpos",
+        job_group="mondriaan_abmil_patterned",
     )
 
     return config

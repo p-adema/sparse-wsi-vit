@@ -15,6 +15,8 @@ class ABMIL(nn.Module):
         out_features: Number of output classes.
         num_branches: Number of parallel attention branches (multi-head).
         attention_dropout: Dropout probability in the classifier head.
+        input_proj_dim: If set, projects features from in_features to this dim before
+            attention. Useful when in_features is very small (e.g. 3 raw RGB channels).
     """
 
     def __init__(
@@ -24,22 +26,27 @@ class ABMIL(nn.Module):
         out_features: int = 1,
         num_branches: int = 1,
         attention_dropout: float = 0.25,
+        input_proj_dim: int | None = None,
     ):
         super().__init__()
         self.out_features = out_features
         self.in_features = in_features
 
-        self.attention_v = nn.Sequential(nn.Linear(in_features, hidden_dim), nn.Tanh())
+        eff = input_proj_dim if input_proj_dim is not None else in_features
+        self.input_proj = nn.Sequential(nn.Linear(in_features, eff), nn.ReLU()) \
+            if input_proj_dim is not None else None
+
+        self.attention_v = nn.Sequential(nn.Linear(eff, hidden_dim), nn.Tanh())
         self.attention_u = nn.Sequential(
-            nn.Linear(in_features, hidden_dim), nn.Sigmoid()
+            nn.Linear(eff, hidden_dim), nn.Sigmoid()
         )
         self.attention_weights = nn.Linear(hidden_dim, num_branches)
 
         self.classifier = nn.Sequential(
-            nn.Linear(in_features * num_branches, in_features // 2),
+            nn.Linear(eff * num_branches, eff // 2),
             nn.ReLU(),
             nn.Dropout(attention_dropout),
-            nn.Linear(in_features // 2, out_features),
+            nn.Linear(eff // 2, out_features),
         )
 
     def forward(self, x: torch.Tensor, return_attention: bool = False) -> dict:
@@ -75,6 +82,9 @@ class ABMIL(nn.Module):
             raise ValueError(
                 f"Feature dimension mismatch: expected {self.in_features}, got {D}."
             )
+
+        if self.input_proj is not None:
+            x = self.input_proj(x)
 
         # Gated attention
         a_v = self.attention_v(x)  # (B, N, hidden_dim)
