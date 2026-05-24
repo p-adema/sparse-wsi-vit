@@ -37,10 +37,10 @@ def _indexer_fwd(
     offs_h = tl.arange(0, BLOCK_INDEXER_H)
     mask_t = offs_t < T
 
-    W = tl.load(W_ptr + offs_h)  # (H,)
+    W = tl.load(W_ptr + offs_h).to(tl.float16) # [H,]
 
     topk_scores  = tl.full((BLOCK_Q, TOP_K), float("-inf"), dtype=tl.float32)
-    topk_indices = tl.full((BLOCK_Q, TOP_K), 0,            dtype=tl.int32)
+    topk_indices = tl.full((BLOCK_Q, TOP_K), 0, dtype=tl.int32)
 
     for k_block in range(0, tl.cdiv(T, BLOCK_K)):
         offs_k = k_block * BLOCK_K + tl.arange(0, BLOCK_K)
@@ -63,15 +63,24 @@ def _indexer_fwd(
                 mask=mask_k[:, None, None] & mask_d[None, None, :], other=0.0,
             )  # (BLOCK_K, H, BLOCK_D)
 
-            Wq = tl.sum(Q * W[None, :, None], axis=1)  # (BLOCK_Q, BLOCK_D)
-            Wk = tl.sum(K * W[None, :, None], axis=1)  # (BLOCK_K, BLOCK_D)
-            block_scores += tl.dot(Wq, tl.trans(Wk))   # (BLOCK_Q, BLOCK_K)
+            # Q = Q_fp8.to(tl.float16)  # (BLOCK_Q, H, BLOCK_D)
+            # K = K_fp8.to(tl.float16)  # (BLOCK_K, H, BLOCK_D)
+
+            Q = Q * W[None, :, None]
+            K = K * W[None, :, None]
+
+            Q = tl.reshape(Q, (BLOCK_Q, BLOCK_INDEXER_H * BLOCK_D))
+            K = tl.reshape(K, (BLOCK_K, BLOCK_INDEXER_H * BLOCK_D))
+
+            block_scores += tl.dot(
+                Q, tl.trans(K), out_dtype=tl.float32
+            )
 
         block_scores = tl.maximum(block_scores, 0.0)
         block_scores = tl.where(mask_k[None, :], block_scores, float("-inf"))
 
         # Merge into running top-K buffer via column-mask + cumsum tie-break
-        for i in range(BLOCK_K):
+        for i in tl.static_range(0, BLOCK_K):
             col_mask = tl.arange(0, BLOCK_K) == i
 
             candidate_score = tl.sum(
@@ -362,10 +371,13 @@ class LightningIndexerFunction(torch.autograd.Function):
         svlb, svlt, svlk    = valid_ptr.stride()
         ssb, sst, ssk       = scores_ptr.stride()
 
+        q_fp8 = q_proj.detach().to(torch.float8_e5m2)
+        k_fp8 = k_proj.detach().to(torch.float8_e5m2)
+
         grid = (B, math.ceil(T / BLOCK_Q))
 
         _indexer_fwd[grid](
-            q_proj, k_proj, idx_ptr, valid_ptr, scores_ptr, W,
+            q_fp8, k_fp8, idx_ptr, valid_ptr, scores_ptr, W,
             sqb, sqt, sqh, sqd,
             skb, skt, skh, skd,
             sib, sit, sik,
@@ -444,15 +456,20 @@ class LightningIndexerFunction(torch.autograd.Function):
         # q_proj, k_proj, W,  B, T, H, D, TOP_K,  BLOCK_Q, BLOCK_K, BLOCK_D, BLOCK_INDEXER_H
         return dQ, dK, dW, None, None, None, None, None, None, None, None, None
 
-
-# Attention forward kernel
+# ---------------------------------------------------------------------------
+# Attention forward kernel — MQA version
+# Q: (B, H, T, D) — per-head queries
+# K: (B, T, D)    — shared across all heads (MQA)
+# V: (B, T, D)    — shared across all heads (MQA)
+# K/V loads drop the pid_h * skh/svh offset — same K/V for every head program.
+# ---------------------------------------------------------------------------
 
 @triton.jit
 def _dsa_attention_fwd(
     Q_ptr, K_ptr, V_ptr, O_ptr, IDX_ptr, VALID_ptr, RW_ptr,
     sqb, sqh, sqt, sqd,
-    skb, skh, skt, skd,
-    svb, svh, svt, svd,
+    skb, skt, skd,           # K has no head stride — (B, T, D)
+    svb, svt, svd,           # V has no head stride — (B, T, D)
     sob, soh, sot, sod,
     sib, sit, sik,
     svlb, svlt, svlk,
@@ -505,13 +522,15 @@ def _dsa_attention_fwd(
         for d_block in range(0, tl.cdiv(D, BLOCK_D)):
             offs_d = d_block * BLOCK_D + tl.arange(0, BLOCK_D)
             mask_d = offs_d < D
+            # Q is per-head — include pid_h * sqh
             Q = tl.load(
                 Q_ptr + pid_b*sqb + pid_h*sqh
                       + offs_t[:, None]*sqt + offs_d[None, :]*sqd,
                 mask=mask_t[:, None] & mask_d[None, :], other=0.0,
             )
+            # K is shared — NO pid_h offset
             K = tl.load(
-                K_ptr + pid_b*skb + pid_h*skh
+                K_ptr + pid_b*skb
                       + idx[:, :, None]*skt + offs_d[None, None, :]*skd,
                 mask=mask_t[:, None, None] & mask_k[None, :, None] & mask_d[None, None, :],
                 other=0.0,
@@ -529,8 +548,9 @@ def _dsa_attention_fwd(
         for d_block in range(0, tl.cdiv(D, BLOCK_D)):
             offs_d = d_block * BLOCK_D + tl.arange(0, BLOCK_D)
             mask_d = offs_d < D
+            # V is shared — NO pid_h offset
             V = tl.load(
-                V_ptr + pid_b*svb + pid_h*svh
+                V_ptr + pid_b*svb
                       + idx[:, :, None]*svt + offs_d[None, None, :]*svd,
                 mask=mask_t[:, None, None] & mask_k[None, :, None] & mask_d[None, None, :],
                 other=0.0,
@@ -564,15 +584,19 @@ def _dsa_attention_fwd(
         )
 
 
-# Attention backward kernel
+# ---------------------------------------------------------------------------
+# Attention backward kernel — MQA version
+# K, V, dK, dV have no head dimension.
+# dK and dV use atomic_add — all H head programs scatter into the same tensor.
+# ---------------------------------------------------------------------------
 
 @triton.jit
 def _dsa_attention_bwd(
     dO_ptr, Q_ptr, K_ptr, V_ptr, O_ptr, IDX_ptr, VALID_ptr, RW_ptr,
     dQ_ptr, dK_ptr, dV_ptr, dRW_ptr,
     sqb, sqh, sqt, sqd,
-    skb, skh, skt, skd,
-    svb, svh, svt, svd,
+    skb, skt, skd,           # K: (B, T, D) — no head dim
+    svb, svt, svd,           # V: (B, T, D) — no head dim
     sob, soh, sot, sod,
     sib, sit, sik,
     svlb, svlt, svlk,
@@ -620,7 +644,7 @@ def _dsa_attention_bwd(
                 mask=mask_t[:, None] & mask_d[None, :], other=0.0,
             )
             K = tl.load(
-                K_ptr + pid_b*skb + pid_h*skh
+                K_ptr + pid_b*skb
                       + idx[:, :, None]*skt + offs_d[None, None, :]*skd,
                 mask=mask_t[:, None, None] & mask_k[None, :, None] & mask_d[None, None, :],
                 other=0.0,
@@ -683,7 +707,7 @@ def _dsa_attention_bwd(
                 mask=mask_t[:, None] & mask_d[None, :], other=0.0,
             )
             K = tl.load(
-                K_ptr + pid_b*skb + pid_h*skh
+                K_ptr + pid_b*skb
                       + idx[:, :, None]*skt + offs_d[None, None, :]*skd,
                 mask=mask_t[:, None, None] & mask_k[None, :, None] & mask_d[None, None, :],
                 other=0.0,
@@ -692,7 +716,7 @@ def _dsa_attention_bwd(
 
         QK      = tl.where(valid_bool, QK * scale, float("-inf"))
         softmax = tl.where(valid_bool, tl.exp(QK - m[:, None]) / l_safe[:, None], 0.0)
-        P       = softmax * rw  # effective weight used in forward
+        P       = softmax * rw
 
         dP = tl.zeros((BLOCK_Q, BLOCK_K), tl.float32)
 
@@ -704,21 +728,23 @@ def _dsa_attention_bwd(
                        + offs_t[:, None]*sot + offs_d[None, :]*sod,
                 mask=mask_t[:, None] & mask_d[None, :], other=0.0,
             )
+            # V is shared — no pid_h offset
             V = tl.load(
-                V_ptr + pid_b*svb + pid_h*svh
+                V_ptr + pid_b*svb
                       + idx[:, :, None]*svt + offs_d[None, None, :]*svd,
                 mask=mask_t[:, None, None] & mask_k[None, :, None] & mask_d[None, None, :],
                 other=0.0,
             )
             dP += tl.sum(dO[:, None, :] * V, axis=-1)
+            # dV: scatter into shared (B, T, D) tensor — atomic because H programs race
             tl.atomic_add(
-                dV_ptr + pid_b*svb + pid_h*svh
+                dV_ptr + pid_b*svb
                        + idx[:, :, None]*svt + offs_d[None, None, :]*svd,
                 (P * valid.to(tl.float32))[:, :, None] * dO[:, None, :],
                 mask=mask_t[:, None, None] & mask_k[None, :, None] & mask_d[None, None, :],
             )
 
-        # dRW[q, slot]: softmax[q,slot] * (dP[q,slot] - Di[q])
+        # dRW — indexed into (B, T, TOP_K), shared across heads, atomic
         dRW_block = tl.where(valid_bool, softmax * (dP - Di[:, None]), 0.0)
         tl.atomic_add(
             dRW_ptr + pid_b*srb + offs_t[:, None]*srt + offs_k[None, :]*srk,
@@ -737,11 +763,12 @@ def _dsa_attention_bwd(
                 mask=mask_t[:, None] & mask_d[None, :], other=0.0,
             )
             K = tl.load(
-                K_ptr + pid_b*skb + pid_h*skh
+                K_ptr + pid_b*skb
                       + idx[:, :, None]*skt + offs_d[None, None, :]*skd,
                 mask=mask_t[:, None, None] & mask_k[None, :, None] & mask_d[None, None, :],
                 other=0.0,
             )
+            # dQ is per-head — no race, direct store
             dQ_tile = tl.load(
                 dQ_ptr + pid_b*sqb + pid_h*sqh
                        + offs_t[:, None]*sqt + offs_d[None, :]*sqd,
@@ -754,15 +781,18 @@ def _dsa_attention_bwd(
                 dQ_tile,
                 mask=mask_t[:, None] & mask_d[None, :],
             )
+            # dK: scatter into shared (B, T, D) tensor — atomic because H programs race
             tl.atomic_add(
-                dK_ptr + pid_b*skb + pid_h*skh
+                dK_ptr + pid_b*skb
                        + idx[:, :, None]*skt + offs_d[None, None, :]*skd,
                 dScore[:, :, None] * Q[:, None, :],
                 mask=mask_t[:, None, None] & mask_k[None, :, None] & mask_d[None, None, :],
             )
 
 
+# ---------------------------------------------------------------------------
 # DSAAttentionFunction — manual autograd.Function
+# ---------------------------------------------------------------------------
 
 class DSAAttentionFunction(torch.autograd.Function):
 
@@ -774,8 +804,8 @@ class DSAAttentionFunction(torch.autograd.Function):
         BLOCK_Q, BLOCK_K, BLOCK_ATTENTION_H, BLOCK_D,
     ):
         sqb, sqh, sqt, sqd  = q.stride()
-        skb, skh, skt, skd  = k.stride()
-        svb, svh, svt, svd  = v.stride()
+        skb, skt, skd  = k.stride()
+        svb, svt, svd  = v.stride()
         sob, soh, sot, sod  = o.stride()
         sib, sit, sik       = idx.stride()
         svlb, svlt, svlk    = valid.stride()
@@ -786,8 +816,8 @@ class DSAAttentionFunction(torch.autograd.Function):
         _dsa_attention_fwd[grid](
             q, k, v, o, idx, valid, routing_weights,
             sqb, sqh, sqt, sqd,
-            skb, skh, skt, skd,
-            svb, svh, svt, svd,
+            skb, skt, skd,
+            svb, svt, svd,
             sob, soh, sot, sod,
             sib, sit, sik,
             svlb, svlt, svlk,
@@ -799,8 +829,8 @@ class DSAAttentionFunction(torch.autograd.Function):
         ctx.save_for_backward(q, k, v, idx, valid, routing_weights, o)
         ctx.strides = (
             sqb, sqh, sqt, sqd,
-            skb, skh, skt, skd,
-            svb, svh, svt, svd,
+            skb, skt, skd,
+            svb, svt, svd,
             sob, soh, sot, sod,
             sib, sit, sik,
             svlb, svlt, svlk,
@@ -813,8 +843,8 @@ class DSAAttentionFunction(torch.autograd.Function):
     def backward(ctx, dO):
         q, k, v, idx, valid, routing_weights, o = ctx.saved_tensors
         (sqb, sqh, sqt, sqd,
-         skb, skh, skt, skd,
-         svb, svh, svt, svd,
+         skb, skt, skd,
+         svb, svt, svd,
          sob, soh, sot, sod,
          sib, sit, sik,
          svlb, svlt, svlk,
@@ -832,8 +862,8 @@ class DSAAttentionFunction(torch.autograd.Function):
             dO.contiguous(), q, k, v, o, idx, valid, routing_weights,
             dQ, dK, dV, dRW,
             sqb, sqh, sqt, sqd,
-            skb, skh, skt, skd,
-            svb, svh, svt, svd,
+            skb, skt, skd,
+            svb, svt, svd,
             sob, soh, sot, sod,
             sib, sit, sik,
             svlb, svlt, svlk,
@@ -848,7 +878,7 @@ class DSAAttentionFunction(torch.autograd.Function):
         # non-tensor scalars: 9
         return (dQ, dK, dV,
                 None, None,  # idx, valid
-                dRW,         # routing_weights — flows back to scores → indexer
+                dRW,         # routing_weights — flows back to sigmoid → scores → indexer
                 None,        # o
                 *([None] * 9))
     

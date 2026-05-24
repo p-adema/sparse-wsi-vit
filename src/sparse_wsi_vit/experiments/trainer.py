@@ -72,7 +72,7 @@ def construct_trainer(
 
     # Metric to monitor
     if cfg.scheduler.mode == "max":
-        monitor = "val/acc"
+        monitor = "val/auc"
     elif cfg.scheduler.mode == "min":
         monitor = "val/loss"
 
@@ -118,7 +118,7 @@ def construct_trainer(
         # Learning rate monitor callback
         pl_callbacks.LearningRateMonitor(log_weight_decay=True),
         # Timer callback
-        pl_callbacks.Timer(),
+        pl_callbacks.Timer(cfg.scheduler.max_duration, verbose=True),
         # Progress bar for SLURM/non-TTY environments - prints training progress with it/s
         pl_callbacks.TQDMProgressBar(refresh_rate=10, leave=True),
         # Early stopping
