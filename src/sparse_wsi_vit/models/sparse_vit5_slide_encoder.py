@@ -12,13 +12,14 @@ from torch import Tensor
 from torch.utils.checkpoint import checkpoint
 
 from sparse_wsi_vit.models.vit_5.models_vit5 import Block, RMSNorm
+from sparse_wsi_vit.models.deepseek_sparse_attention import DeepseekSparseAttentionAdapter
 from sparse_wsi_vit.models.static_sparse_attention import (
     StaticSparseAttentionAdapter,
     hilbert_sort,
 )
 
 
-_SPARSE_ATTN_TYPES = ("static")
+_SPARSE_ATTN_TYPES = ("static", "dsa")
 
 class SparseViT5SlideEncoder(nn.Module):
     """WSI slide encoder: ViT-5 blocks with configurable sparse attention.
@@ -48,6 +49,7 @@ class SparseViT5SlideEncoder(nn.Module):
 
         Shared transformer kwargs:
             mlp_ratio: MLP hidden-dim expansion factor.
+            attn_dropout: Dropout on attention weights.
             proj_dropout: Dropout after projections.
             drop_path_rate: Stochastic-depth drop probability (same for all layers).
 
@@ -74,8 +76,16 @@ class SparseViT5SlideEncoder(nn.Module):
         flex_block_size: int = 128,
         rope_theta: float = 10_000.0,
         rope_coord_high: float = 100_000.0,
+        # DeepseekSparseAttention kwards
+        indexer_heads: int = 4,
+        indexer_dim: int = 32,
+        top_k: int = 128,
+        BLOCK_Q: int = 32,
+        BLOCK_K: int = 32,
+        BLOCK_D: int = 32,
         # Shared transformer kwargs
         mlp_ratio: float = 4.0,
+        attn_dropout: float = 0.0,
         proj_dropout: float = 0.0,
         drop_path_rate: float = 0.0,
         # ViT-5 Block kwargs
@@ -108,13 +118,30 @@ class SparseViT5SlideEncoder(nn.Module):
         self.cls_tokens = nn.Parameter(torch.zeros(1, num_cls, embed_dim))
         nn.init.trunc_normal_(self.cls_tokens, std=0.02)
 
-        AdapterClass = StaticSparseAttentionAdapter if sparse_attn == "static" else None
+        AdapterClass = None
+
         if sparse_attn == "static":
+            AdapterClass = StaticSparseAttentionAdapter
+
             sparse_kwargs: dict = dict(
                 num_cls=num_cls,
                 window_size=window_size,
                 chunk_size=chunk_size,
                 flex_block_size=flex_block_size,
+                rope_theta=rope_theta,
+                rope_coord_high=rope_coord_high,
+            )
+
+        elif sparse_attn == "dsa":
+            AdapterClass = DeepseekSparseAttentionAdapter
+
+            sparse_kwargs: dict = dict(
+                indexer_heads=indexer_heads,
+                indexer_dim=indexer_dim,
+                top_k=top_k,
+                BLOCK_Q=BLOCK_Q,
+                BLOCK_K=BLOCK_K,
+                BLOCK_D=BLOCK_D,
                 rope_theta=rope_theta,
                 rope_coord_high=rope_coord_high,
             )
@@ -130,6 +157,7 @@ class SparseViT5SlideEncoder(nn.Module):
                 mlp_ratio=mlp_ratio,
                 qkv_bias=False,
                 drop=proj_dropout,
+                attn_drop=attn_dropout,
                 drop_path=drop_path_rate,
                 norm_layer=norm_layer,
                 Attention_block=attn_block,
@@ -170,6 +198,7 @@ class SparseViT5SlideEncoder(nn.Module):
         if coords is not None and coords.dim() == 2:
             coords = coords.unsqueeze(0)
 
+        print(f"[forward] slide shape: {x.shape}, T={x.shape[1]}", flush=True)
         batch_size = x.shape[0]
 
         x = self.input_proj(x)  # (batch_size, patch_len, embed_dim)

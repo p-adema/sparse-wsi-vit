@@ -1,11 +1,11 @@
-"""ViT-5 Dense on pre-extracted ShapePatchCNN features from HalliGalli synthetic images.
+"""ViT-5 Dense on raw RGB pixel features from the Mondriaan solid-colour control.
 
-ShapePatchCNN (256-dim embedding) is trained from scratch on the HalliGalli
-shape vocabulary and used as a frozen patch encoder.
-Features are pre-extracted by extract_halligalli.py.
+Solid-colour control where mean colour IS discriminative.
+Expected to succeed (sanity check that the model and training pipeline work).
 
 Usage:
-    uv run experiments/run.py --config src/sparse_wsi_vit/configs/halligalli_vit5dense.py
+    MONDRIAAN_DATA_DIR=<path/to/solid_ps1> \\
+    uv run experiments/run.py --config src/sparse_wsi_vit/configs/mondriaan_solid_vit5dense.py
 """
 
 import os
@@ -19,39 +19,33 @@ from sparse_wsi_vit.experiments.default_cfg import (
 )
 from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
 from sparse_wsi_vit.models.vit5_dense import VitDensePreEmbedded
-from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import (
-    WSIAttnWrapper,
-)
-from sparse_wsi_vit.experiments.datamodules.halligalli_h5_datamodule import (
-    HalliGalliH5DataModule,
-)
+from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import WSIAttnWrapper
+from sparse_wsi_vit.experiments.datamodules.mondriaan_h5_datamodule import MondriaanH5DataModule
 
 # ─── Data ────────────────────────────────────────────────────────────────────
-DATA_DIR = os.environ["HALLIGALLI_DATA_DIR"]
-IN_FEATURES = 256  # ShapePatchCNN embed_dim
-OUT_FEATURES = 2  # binary, CrossEntropy
+DATA_DIR     = os.environ["MONDRIAAN_DATA_DIR"]
+IN_FEATURES  = 3
+OUT_FEATURES = 2
 
 # ─── Optimisation ────────────────────────────────────────────────────────────
-BATCH_SIZE = 1  # standard for MIL bags
-NUM_WORKERS = 16
-PRECISION = "bf16-mixed"
+BATCH_SIZE    = 256
+NUM_WORKERS   = 4
+PRECISION     = "bf16-mixed"
 
-DOWNPROJ = None  # 256-d input is already small; no projection needed
-TRAINING_ITERATIONS = 10_000
+TRAINING_ITERATIONS          = 10_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
-LEARNING_RATE = 5e-5
-WEIGHT_DECAY = 1e-4
-GRAD_CLIP = 1.0
-ACCUMULATE_GRAD_STEPS = 8
-ROPE_DYNAMIC_HIGH = 224  # todo lucius, dit moet de groote van de patch size zijn
+LEARNING_RATE                = 2e-4
+WEIGHT_DECAY                 = 1e-4
+GRAD_CLIP                    = 1.0
+ACCUMULATE_GRAD_STEPS        = 1
 
 
 def get_config() -> ExperimentConfig:
     config = ExperimentConfig()
     config.debug = False
-    config.seed = 42
+    config.seed  = 42
 
-    config.dataset = LazyConfig(HalliGalliH5DataModule)(
+    config.dataset = LazyConfig(MondriaanH5DataModule)(
         data_dir=DATA_DIR,
         in_features=IN_FEATURES,
         batch_size=BATCH_SIZE,
@@ -61,8 +55,10 @@ def get_config() -> ExperimentConfig:
     config.net = LazyConfig(VitDensePreEmbedded)(
         in_features=IN_FEATURES,
         out_features=OUT_FEATURES,
-        downproj=DOWNPROJ,
-        rope_dynamic_high=ROPE_DYNAMIC_HIGH,
+        downproj=256,
+        depth=3,               # vit5_small defaults to 12; 3 blocks to match other experiments
+        num_heads=4,
+        rope_dynamic_high=32,  # pixel coords 0–31 (32×32 image)
     )
 
     config.lightning_wrapper_class = LazyConfig(WSIAttnWrapper)(
@@ -94,7 +90,7 @@ def get_config() -> ExperimentConfig:
 
     config.wandb = WandbConfig(
         project="wsi-classification",
-        job_group="halligalli_vit5dense_randpos",
+        job_group="mondriaan_vit5dense_solid",
     )
 
     return config
