@@ -21,7 +21,7 @@ from collections import Counter
 
 import numpy as np
 
-# ── fixed base colours (used when random_colors=False) ───────────────────────
+# ── fixed base colors (used when random_colors=False) ───────────────────────
 # Mean of {RED, CYAN, GREEN, MAGENTA} = (0.5, 0.5, 0.5) under any permutation.
 RED     = np.array([1.0, 0.0, 0.0], dtype=np.float32)
 CYAN    = np.array([0.0, 1.0, 1.0], dtype=np.float32)
@@ -30,7 +30,7 @@ MAGENTA = np.array([1.0, 0.0, 1.0], dtype=np.float32)
 
 _R, _C, _G, _M = RED, CYAN, GREEN, MAGENTA
 
-# ── patterned vocabulary (fixed-colour mode) ──────────────────────────────────
+# ── patterned vocabulary (fixed-color mode) ──────────────────────────────────
 # 6 permutations of {R,C,G,M}; pixel order is [TL, TR, BL, BR].
 # All pairwise Hamming distances are 3 or 4 (verified exhaustively).
 PATTERNED_VOCAB = [
@@ -45,10 +45,10 @@ PATTERNED_NAMES = [
     "RC/GM", "CR/MG", "GM/RC", "MG/CR", "RG/MC", "CM/GR",
 ]
 
-# ── permutation indices shared between fixed and random-colour modes ──────────
+# ── permutation indices shared between fixed and random-color modes ──────────
 # These define the 6 arrangement types as index permutations of [c0,c1,c2,c3].
 # Hamming distance ≥ 3 between any two rows (property of the permutations,
-# independent of the specific colours chosen).
+# independent of the specific colors chosen).
 _PATTERNED_PERMS = [
     [0, 1, 2, 3],
     [1, 0, 3, 2],
@@ -59,7 +59,7 @@ _PATTERNED_PERMS = [
 ]
 
 # ── solid-colour control vocabulary (fixed-colour mode) ───────────────────────
-# Mean colour IS discriminative (label=1 biases the mean; label=0 is grey).
+# Mean color IS discriminative (label=1 biases the mean; label=0 is grey).
 SOLID_VOCAB = [
     [_R, _R, _R, _R],  # 0 – solid red
     [_C, _C, _C, _C],  # 1 – solid cyan
@@ -122,12 +122,7 @@ class MondriaanGenerator:
         min_sep:
             Minimum Euclidean distance between object top-left corners (px).
         random_colors:
-            If True, sample 4 colours uniformly from [0,1]^3 per image and
-            apply the fixed permutation structures to them. The mean-preservation
-            property still holds (each object uses all 4 colours once), so
-            pooling-based aggregators still provably fail on patterned. However,
-            matching-pair objects are now pixel-identical at each quadrant
-            position, providing a non-zero gradient signal from initialisation.
+            If True, sample 4 colors uniformly from [0,1]^3 per image.
 
         Returns
         -------

@@ -32,7 +32,7 @@ BATCH_SIZE    = 256
 NUM_WORKERS   = 4
 PRECISION     = "bf16-mixed"
 
-TRAINING_ITERATIONS          = 3_000
+TRAINING_ITERATIONS          = 10_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
 LEARNING_RATE                = 2e-4
 WEIGHT_DECAY                 = 1e-4
@@ -86,7 +86,6 @@ def get_config() -> ExperimentConfig:
         warmup_iterations_percentage=WARMUP_ITERATIONS_PERCENTAGE,
         total_iterations=TRAINING_ITERATIONS,
         mode="max",
-        patience=999,
     )
 
     config.wandb = WandbConfig(
