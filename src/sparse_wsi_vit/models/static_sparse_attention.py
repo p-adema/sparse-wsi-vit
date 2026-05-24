@@ -13,6 +13,7 @@ from torch import Tensor
 from torch.nn.attention.flex_attention import flex_attention, BlockMask
 
 from sparse_wsi_vit.models.vit_5.rope import VisionRotaryEmbedding
+from sparse_wsi_vit.models.hilbert_sort import hilbert_sort
 
 compiled_flex_attention = torch.compile(
     partial(flex_attention, kernel_options={"BACKEND": "TRITON"}),
@@ -44,7 +45,9 @@ def build_block_mask(
     blocks_per_chunk = chunk_size // flex_block_size
     num_chunks = (seq_len + chunk_size - 1) // chunk_size
 
-    num_cls_flex_blocks = (num_cls + flex_block_size - 1) // flex_block_size if num_cls > 0 else 0
+    num_cls_flex_blocks = (
+        (num_cls + flex_block_size - 1) // flex_block_size if num_cls > 0 else 0
+    )
 
     all_kv_lists: list[list[int]] = []
     for qb in range(num_blocks):
@@ -90,48 +93,6 @@ def build_block_mask(
         mask_mod=mask_mod,
         seq_lengths=(seq_len, seq_len),
     )
-
-
-
-def hilbert_sort(coords: Tensor) -> Tensor:
-    """Sort patches by 2-D Hilbert curve so spatially nearby patches are contiguous.
-
-    Args:
-        coords: ``(B, N, 2)`` pixel coordinates.
-
-    Returns:
-        ``(B, N)`` indices that reorder patches along the Hilbert curve.
-    """
-    B, N, _ = coords.shape
-    bits = 16
-    grid_size = 1 << bits
-
-    cmin = coords.amin(dim=1, keepdim=True)
-    cmax = coords.amax(dim=1, keepdim=True)
-    span = (cmax - cmin).clamp(min=1).float()
-    norm = ((coords - cmin).float() / span * (grid_size - 1)).long()
-
-    x = norm[..., 0].clone()
-    y = norm[..., 1].clone()
-    d = torch.zeros(B, N, dtype=torch.long, device=coords.device)
-
-    s = grid_size >> 1
-    while s > 0:
-        rx = ((x & s) > 0).long()
-        ry = ((y & s) > 0).long()
-        d += s * s * ((3 * rx) ^ ry)
-        no_ry = ry == 0
-        flip = no_ry & (rx == 1)
-        x = torch.where(flip, s - 1 - x, x)
-        y = torch.where(flip, s - 1 - y, y)
-        x_new = torch.where(no_ry, y, x)
-        y_new = torch.where(no_ry, x, y)
-        x, y = x_new, y_new
-        s >>= 1
-
-    return d.argsort(dim=1)
-
-
 
 
 class StaticSparseAttention(nn.Module):
@@ -209,14 +170,20 @@ class StaticSparseAttention(nn.Module):
         num_cls = self.num_cls
 
         qkv = self.qkv(x).reshape(batch_size, seq_len, 3, self.num_heads, self.head_dim)
-        qkv = qkv.permute(2, 0, 3, 1, 4)  # (3, batch_size, num_heads, seq_len, head_dim)
+        qkv = qkv.permute(
+            2, 0, 3, 1, 4
+        )  # (3, batch_size, num_heads, seq_len, head_dim)
         q, k, v = qkv.unbind(0)
 
         if coords is not None:
             q_patch = q[:, :, num_cls:].transpose(1, 2)
             k_patch = k[:, :, num_cls:].transpose(1, 2)
-            q = torch.cat([q[:, :, :num_cls], self.rope(q_patch, coords).transpose(1, 2)], dim=2)
-            k = torch.cat([k[:, :, :num_cls], self.rope(k_patch, coords).transpose(1, 2)], dim=2)
+            q = torch.cat(
+                [q[:, :, :num_cls], self.rope(q_patch, coords).transpose(1, 2)], dim=2
+            )
+            k = torch.cat(
+                [k[:, :, :num_cls], self.rope(k_patch, coords).transpose(1, 2)], dim=2
+            )
 
         chunk_size = self.chunk_size
         window_size = self.window_size
@@ -230,8 +197,13 @@ class StaticSparseAttention(nn.Module):
             return q_is_cls | kv_is_cls | in_window
 
         block_mask = build_block_mask(
-            seq_len, num_cls, chunk_size, window_size,
-            self.flex_block_size, x.device, mask_mod,
+            seq_len,
+            num_cls,
+            chunk_size,
+            window_size,
+            self.flex_block_size,
+            x.device,
+            mask_mod,
         )
         out = compiled_flex_attention(q, k, v, block_mask=block_mask)
 
@@ -272,8 +244,14 @@ class StaticSparseViTBlock(nn.Module):
         super().__init__()
         self.norm1 = nn.LayerNorm(embed_dim)
         self.attn = StaticSparseAttention(
-            embed_dim, num_heads, num_cls, window_size, chunk_size,
-            flex_block_size, rope_theta, rope_coord_high,
+            embed_dim,
+            num_heads,
+            num_cls,
+            window_size,
+            chunk_size,
+            flex_block_size,
+            rope_theta,
+            rope_coord_high,
         )
         self.drop1 = nn.Dropout(proj_dropout)
 
@@ -341,21 +319,23 @@ class StaticSparseViTSlideEncoder(nn.Module):
         self.cls_tokens = nn.Parameter(torch.zeros(1, num_cls, embed_dim))
         nn.init.trunc_normal_(self.cls_tokens, std=0.02)
 
-        self.blocks = nn.ModuleList([
-            StaticSparseViTBlock(
-                embed_dim=embed_dim,
-                num_heads=num_heads,
-                num_cls=num_cls,
-                window_size=window_size,
-                chunk_size=chunk_size,
-                flex_block_size=flex_block_size,
-                expansion_factor=expansion_factor,
-                proj_dropout=proj_dropout,
-                rope_theta=rope_theta,
-                rope_coord_high=rope_coord_high,
-            )
-            for _ in range(num_layers)
-        ])
+        self.blocks = nn.ModuleList(
+            [
+                StaticSparseViTBlock(
+                    embed_dim=embed_dim,
+                    num_heads=num_heads,
+                    num_cls=num_cls,
+                    window_size=window_size,
+                    chunk_size=chunk_size,
+                    flex_block_size=flex_block_size,
+                    expansion_factor=expansion_factor,
+                    proj_dropout=proj_dropout,
+                    rope_theta=rope_theta,
+                    rope_coord_high=rope_coord_high,
+                )
+                for _ in range(num_layers)
+            ]
+        )
 
         self.norm = nn.LayerNorm(embed_dim)
         self.cls_pool = nn.Linear(embed_dim, 1, bias=False)
@@ -396,7 +376,7 @@ class StaticSparseViTSlideEncoder(nn.Module):
 
         x = self.norm(x)
 
-        cls_tokens = x[:, :self.num_cls]
+        cls_tokens = x[:, : self.num_cls]
         cls_pool_weights = torch.softmax(self.cls_pool(cls_tokens), dim=1)
         cls_out = (cls_pool_weights * cls_tokens).sum(dim=1)
 
@@ -404,6 +384,7 @@ class StaticSparseViTSlideEncoder(nn.Module):
             "logits": self.head(cls_out),
             "cls_pool_weights": cls_pool_weights,
         }
+
 
 class StaticSparseAttentionAdapter(nn.Module):
     """Adapts StaticSparseAttention to the ViT-5 Block ``Attention_block`` API.
