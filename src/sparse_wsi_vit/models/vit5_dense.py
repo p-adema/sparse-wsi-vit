@@ -1,7 +1,6 @@
+import timm
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import timm
 
 from sparse_wsi_vit.models.vit_5 import register as register_vit_5
 

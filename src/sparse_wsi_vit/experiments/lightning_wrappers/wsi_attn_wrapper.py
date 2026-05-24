@@ -10,8 +10,6 @@ from sparse_wsi_vit.experiments.lightning_wrappers.base_lightning_wrapper import
     LightningWrapperBase,
 )
 
-_deprc = object()
-
 
 class WSIAttnWrapper(LightningWrapperBase):
     """Lightning wrapper for global attention on WSIs."""
@@ -21,8 +19,6 @@ class WSIAttnWrapper(LightningWrapperBase):
         network: torch.nn.Module,
         cfg: ExperimentConfig,
         use_bce_loss: bool = True,
-        training_crop_tokens=_deprc,  # will be removed
-        eval_crop_tokens=_deprc,
         compile_mode: str | None = None,
     ):
         """Initialize the WSIAttnWrapper.
@@ -35,9 +31,6 @@ class WSIAttnWrapper(LightningWrapperBase):
                 When *network.out_features* > 1 and this is False, CrossEntropyLoss
                 is used instead.
         """
-        if training_crop_tokens is not _deprc or eval_crop_tokens is not _deprc:
-            print("We aren't doing crops, please remove from your config")
-
         super().__init__(network=network, cfg=cfg)
 
         self.multiclass = hasattr(network, "out_features") and network.out_features > 1
@@ -64,8 +57,6 @@ class WSIAttnWrapper(LightningWrapperBase):
         self.val_auc = torchmetrics.AUROC(**prf_kwargs)
 
         self.use_bce_loss = use_bce_loss
-        self.training_crop_tokens = training_crop_tokens
-        self.eval_crop_tokens = eval_crop_tokens
         if self.multiclass and not self.use_bce_loss:
             self.loss_metric = torch.nn.CrossEntropyLoss()
         else:
@@ -93,7 +84,6 @@ class WSIAttnWrapper(LightningWrapperBase):
 
         torch._dynamo.mark_dynamic(inputs, 1)
         torch._dynamo.mark_dynamic(coords, 1)
-
         output_dict = self.network(inputs, coords)
 
         logits = output_dict["logits"].squeeze(1)
@@ -205,10 +195,11 @@ class WSIAttnWrapper(LightningWrapperBase):
         labels = batch["label"]
         batch_size = batch["input"].size(0)
         num_patches = batch["input"].size(1)
+        logits = output_dict["logits"]
         self.val_precision.update(preds, labels)
         self.val_recall.update(preds, labels)
         self.val_f1.update(preds, labels)
-        self.val_auc.update(preds, labels)
+        self.val_auc.update(logits, labels)
         self.log(
             f"{kind}/loss",
             loss,
@@ -224,7 +215,6 @@ class WSIAttnWrapper(LightningWrapperBase):
             batch_size=batch_size,
         )
         self.log(f"{kind}/step_ms", step_ms, on_epoch=True, batch_size=batch_size)
-        logits = output_dict["logits"]
         self.log(
             f"{kind}/logits_mean",
             logits.mean(),

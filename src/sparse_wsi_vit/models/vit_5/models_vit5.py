@@ -304,7 +304,7 @@ class vit_models(nn.Module):
             self.patch_embed = nn.Sequential()
             num_patches = -1
             if ape or (rope and not rope_dynamic):
-                warnings.warn(f"APE/non-dynamic RoPe might break", stacklevel=3)
+                warnings.warn("APE/non-dynamic RoPe might break", stacklevel=3)
 
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.reg_token = (
@@ -313,10 +313,13 @@ class vit_models(nn.Module):
             else None
         )
 
-        rope_reg_size = int(num_registers**0.5)
-        assert rope_reg_size**2 == num_registers, (
-            "num_registers must be a square number"
-        )
+        if rope_reg:
+            rope_reg_size = int(num_registers**0.5)
+            if rope_reg != "partial":
+                assert rope_reg_size**2 == num_registers, (
+                    "num_registers must be a square number for register rope,"
+                    "with rope_reg='partial' you try to can use the largest fitting square"
+                )
 
         self.pos_embed = (
             nn.Parameter(torch.zeros(1, num_patches, embed_dim)) if ape else None
