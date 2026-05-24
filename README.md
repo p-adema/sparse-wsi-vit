@@ -2,6 +2,8 @@
 
 This repository contains the code for our paper **"Sparse Attention for Resolution Scaling in Digital Histopathology"**, which investigates sparse attention mechanisms (SSA, DSA, NSA) as an alternative to dense self-attention for gigapixel Whole Slide Image (WSI) classification. We show that sparse attention enables resolution scaling beyond what dense attention can handle, and introduce **Mondriaan**: a synthetic benchmark that exposes the limitations of pooling-based MIL methods.
 
+![Attention illustration](assets/attention-illustration-final.png)
+
 ---
 
 ## Repository structure
@@ -10,7 +12,7 @@ This repository contains the code for our paper **"Sparse Attention for Resoluti
 sparse-wsi-vit/
 ├── src/sparse_wsi_vit/
 │   ├── configs/          # Python experiment configs (one per model/dataset)
-│   ├── datasets/         # Dataset classes for CAMELYON16, Mondriaan, HalliGalli
+│   ├── datasets/         # Dataset classes for CAMELYON16, Mondriaan
 │   ├── experiments/      # Datamodules, Lightning wrappers, trainer, utilities
 │   └── models/           # ABMIL, TransMIL, ViT-5 (Dense, SSA, DSA) + Triton kernels
 ├── experiments/
@@ -77,7 +79,18 @@ Each `.h5` file contains per-slide embeddings at all scales used in the paper (`
 
 ### Mondriaan (synthetic)
 
-Mondriaan images are generated on-the-fly during training/evaluation and require no external download. The dataset split is fixed at 10 000 train / 2 000 val / 2 000 test with a balanced positive/negative label distribution.
+Mondriaan is a synthetic pixel-level benchmark designed to expose the limitations of pooling-based MIL methods. Four 4×4-pixel objects are placed at random positions in a 32×32 black image. The label is 1 when exactly one matching pair exists among the four objects, and 0 when all four are distinct. Each object independently samples 4 random RGB colors, making the matching pair pixel-identical but leaving no discriminative mean-color signal for pooling-based aggregators (ABMIL). A solid-color control variant is included where mean color IS discriminative, confirming that failure on the patterned task is arrangement-specific.
+
+Data must be pre-extracted to HDF5 using `extract_mondriaan.py` before training. The dataset split is fixed at 10 000 train / 2 000 val / 2 000 test with a balanced label distribution.
+
+```bash
+uv run src/sparse_wsi_vit/datasets/mondriaan_dataset/extract_mondriaan.py \
+    --output_dir data/mondriaan/patterned_ps1 --image_size 32 --random_colors
+
+# resolution ablation (2× pooled)
+uv run src/sparse_wsi_vit/datasets/mondriaan_dataset/extract_mondriaan.py \
+    --output_dir data/mondriaan/patterned_ps2 --image_size 32 --pool_size 2 --random_colors
+```
 
 ---
 
