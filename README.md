@@ -1,5 +1,10 @@
 # Sparse Attention for Resolution Scaling in Digital Histopathology
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/release/python-3120/)
+[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+
 This repository contains the code for our paper **"Sparse Attention for Resolution Scaling in Digital Histopathology"**,
 which investigates sparse attention mechanisms (SSA, DSA, NSA) as an alternative to dense self-attention for gigapixel
 Whole Slide Image (WSI) classification. We show that sparse attention enables resolution scaling beyond what dense
@@ -186,6 +191,12 @@ SSA is the only model that continues to improve as patch size decreases down to 
 where dense attention runs out of memory.
 
 ---
+
+## Contribution and code quality
+
+If you have ideas or contributions you wish to add to the code base,
+feel free to send a PR! However, make sure to run a Black-style
+formatter (e.g. Ruff) first.
 
 ## Citation
 
