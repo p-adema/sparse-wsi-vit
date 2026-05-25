@@ -10,15 +10,15 @@ import torch.nn.functional as F
 import triton
 import triton.language as tl
 
-from sparse_wsi_vit.models.nsa_kernels.fla_utils import autotune_cache_kwargs, tensor_cache
+from sparse_wsi_vit.models.nsa_kernels.fla_utils import (
+    autotune_cache_kwargs,
+    tensor_cache,
+)
 
 
 @triton.autotune(
-    configs=[
-        triton.Config({}, num_warps=num_warps)
-        for num_warps in [4, 8, 16, 32]
-    ],
-    key=['B'],
+    configs=[triton.Config({}, num_warps=num_warps) for num_warps in [4, 8, 16, 32]],
+    key=["B"],
     **autotune_cache_kwargs,
 )
 @triton.jit
@@ -28,7 +28,10 @@ def prepare_position_ids_kernel(
     B: tl.constexpr,
 ):
     i_n = tl.program_id(0)
-    bos, eos = tl.load(cu_seqlens + i_n).to(tl.int32), tl.load(cu_seqlens + i_n + 1).to(tl.int32)
+    bos, eos = (
+        tl.load(cu_seqlens + i_n).to(tl.int32),
+        tl.load(cu_seqlens + i_n + 1).to(tl.int32),
+    )
     T = eos - bos
 
     o = tl.arange(0, B)
@@ -70,7 +73,7 @@ def prepare_split_cu_seqlens(
     split_size: int | None = None,
     cu_seqlens: torch.LongTensor | None = None,
     dtype: torch.dtype | None = torch.int32,
-    device: torch.device | None = torch.device('cpu'),
+    device: torch.device | None = torch.device("cpu"),
 ) -> torch.LongTensor:
     """Sub-split a (optionally packed) batch along the token axis.
 
@@ -104,34 +107,47 @@ def prepare_split_cu_seqlens(
             i
             for bos, eos in zip(cu_seqlens[:-1], cu_seqlens[1:], strict=False)
             for i in range(bos, eos, split_size)
-        ] + [cu_seqlens[-1]],
+        ]
+        + [cu_seqlens[-1]],
         dtype=dtype,
         device=device,
     )
 
 
 @tensor_cache
-def prepare_position_ids(cu_seqlens: torch.LongTensor, cu_seqlens_cpu: torch.LongTensor | None = None) -> torch.LongTensor:
+def prepare_position_ids(
+    cu_seqlens: torch.LongTensor, cu_seqlens_cpu: torch.LongTensor | None = None
+) -> torch.LongTensor:
     if cu_seqlens_cpu is not None:
-        return torch.cat([
+        return torch.cat(
+            [
+                torch.arange(n, dtype=cu_seqlens.dtype, device=cu_seqlens.device)
+                for n in prepare_lens(cu_seqlens_cpu).unbind()
+            ]
+        )
+    return torch.cat(
+        [
             torch.arange(n, dtype=cu_seqlens.dtype, device=cu_seqlens.device)
-            for n in prepare_lens(cu_seqlens_cpu).unbind()
-        ])
-    return torch.cat([
-        torch.arange(n, dtype=cu_seqlens.dtype, device=cu_seqlens.device)
-        for n in prepare_lens(cu_seqlens).unbind()
-    ])
+            for n in prepare_lens(cu_seqlens).unbind()
+        ]
+    )
 
 
 @tensor_cache
-def prepare_sequence_ids(cu_seqlens: torch.LongTensor, cu_seqlens_cpu: torch.LongTensor | None = None) -> torch.LongTensor:
+def prepare_sequence_ids(
+    cu_seqlens: torch.LongTensor, cu_seqlens_cpu: torch.LongTensor | None = None
+) -> torch.LongTensor:
     return prepare_position_ids(cu_seqlens, cu_seqlens_cpu).eq(0).cumsum(0) - 1
 
 
 @tensor_cache
-def prepare_token_indices(cu_seqlens: torch.LongTensor, cu_seqlens_cpu: torch.LongTensor | None = None) -> torch.LongTensor:
+def prepare_token_indices(
+    cu_seqlens: torch.LongTensor, cu_seqlens_cpu: torch.LongTensor | None = None
+) -> torch.LongTensor:
     position_ids = prepare_position_ids(cu_seqlens, cu_seqlens_cpu)
-    return torch.stack([prepare_sequence_ids(cu_seqlens, cu_seqlens_cpu), position_ids], 1).to(cu_seqlens)
+    return torch.stack(
+        [prepare_sequence_ids(cu_seqlens, cu_seqlens_cpu), position_ids], 1
+    ).to(cu_seqlens)
 
 
 @tensor_cache
@@ -141,10 +157,19 @@ def prepare_chunk_indices(
     cu_seqlens_cpu: torch.LongTensor | None = None,
 ) -> torch.LongTensor:
     if cu_seqlens_cpu is not None:
-        indices = torch.cat([torch.arange(n, device=cu_seqlens.device)
-                            for n in triton.cdiv(prepare_lens(cu_seqlens_cpu), chunk_size).tolist()])
+        indices = torch.cat(
+            [
+                torch.arange(n, device=cu_seqlens.device)
+                for n in triton.cdiv(prepare_lens(cu_seqlens_cpu), chunk_size).tolist()
+            ]
+        )
         return torch.stack([indices.eq(0).cumsum(0) - 1, indices], 1).to(cu_seqlens)
-    indices = torch.cat([torch.arange(n) for n in triton.cdiv(prepare_lens(cu_seqlens), chunk_size).tolist()])
+    indices = torch.cat(
+        [
+            torch.arange(n)
+            for n in triton.cdiv(prepare_lens(cu_seqlens), chunk_size).tolist()
+        ]
+    )
     return torch.stack([indices.eq(0).cumsum(0) - 1, indices], 1).to(cu_seqlens)
 
 
@@ -153,14 +178,16 @@ def prepare_chunk_offsets(
     cu_seqlens: torch.LongTensor,
     chunk_size: int,
 ) -> torch.LongTensor:
-    return F.pad(triton.cdiv(prepare_lens(cu_seqlens), chunk_size), (1, 0), value=0).cumsum(-1)
+    return F.pad(
+        triton.cdiv(prepare_lens(cu_seqlens), chunk_size), (1, 0), value=0
+    ).cumsum(-1)
 
 
 @tensor_cache
 def get_max_num_splits(
     cu_seqlens: torch.LongTensor,
     chunk_size: int,
-    cu_seqlens_cpu: torch.LongTensor | None = None
+    cu_seqlens_cpu: torch.LongTensor | None = None,
 ) -> int:
     if cu_seqlens_cpu is not None:
         return triton.cdiv(int(max(prepare_lens(cu_seqlens_cpu))), chunk_size)

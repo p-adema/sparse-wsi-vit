@@ -34,8 +34,10 @@ class MondriaanFlatDataset(Dataset):
                 raise ValueError(f"Cannot parse label from filename: {f.name}")
             self.samples.append((f, int(m.group(1))))
 
-        print(f"[MondriaanFlatDataset] {split}: {len(self.samples)} samples "
-              f"from {self.data_dir}")
+        print(
+            f"[MondriaanFlatDataset] {split}: {len(self.samples)} samples "
+            f"from {self.data_dir}"
+        )
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -44,20 +46,20 @@ class MondriaanFlatDataset(Dataset):
         path, label = self.samples[idx]
         with h5py.File(path, "r") as hf:
             features = torch.from_numpy(hf["features"][:]).float()  # (N, 3)
-            coords   = torch.from_numpy(hf["coords"][:]).float()    # (N, 2)
+            coords = torch.from_numpy(hf["coords"][:]).float()  # (N, 2)
         return {
-            "input":      features,
-            "label":      torch.tensor(label, dtype=torch.long),
-            "coords":     coords,
+            "input": features,
+            "label": torch.tensor(label, dtype=torch.long),
+            "coords": coords,
             "slide_name": path.stem,
         }
 
 
 def _collate(batch: list[dict]) -> dict:
     return {
-        "input":      torch.stack([b["input"] for b in batch]),   # (B, N, 3)
-        "label":      torch.stack([b["label"] for b in batch]),   # (B,)
-        "coords":     torch.stack([b["coords"] for b in batch]),  # (B, N, 2)
+        "input": torch.stack([b["input"] for b in batch]),  # (B, N, 3)
+        "label": torch.stack([b["label"] for b in batch]),  # (B,)
+        "coords": torch.stack([b["coords"] for b in batch]),  # (B, N, 2)
         "slide_name": [b["slide_name"] for b in batch],
     }
 
@@ -83,18 +85,18 @@ class MondriaanH5DataModule(pl.LightningDataModule):
         num_workers: int = 4,
     ):
         super().__init__()
-        self.data_dir    = data_dir
+        self.data_dir = data_dir
         self.in_features = in_features
-        self.batch_size  = batch_size
+        self.batch_size = batch_size
         self.num_workers = num_workers
 
-        self.input_channels  = in_features
+        self.input_channels = in_features
         self.output_channels = 2
 
     def setup(self, stage: str | None = None) -> None:
         self.train_dataset = MondriaanFlatDataset(self.data_dir, "train")
-        self.val_dataset   = MondriaanFlatDataset(self.data_dir, "val")
-        self.test_dataset  = MondriaanFlatDataset(self.data_dir, "test")
+        self.val_dataset = MondriaanFlatDataset(self.data_dir, "val")
+        self.test_dataset = MondriaanFlatDataset(self.data_dir, "test")
 
     def _loader(self, dataset: Dataset, shuffle: bool) -> DataLoader:
         return DataLoader(

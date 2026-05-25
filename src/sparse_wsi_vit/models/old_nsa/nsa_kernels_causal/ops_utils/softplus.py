@@ -55,7 +55,11 @@ def _generate_softplus2(num_pack):
 
 
 def _generate_constraints(num_pack):
-    return ",".join("=r" for i in range(num_pack)) + "," + ",".join("r" for i in range(num_pack))
+    return (
+        ",".join("=r" for i in range(num_pack))
+        + ","
+        + ",".join("r" for i in range(num_pack))
+    )
 
 
 _NUM_REG = 1

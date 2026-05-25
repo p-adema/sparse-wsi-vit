@@ -14,7 +14,10 @@ import triton
 import triton.language as tl
 
 from sparse_wsi_vit.models.nsa_kernels.ops_utils.op import exp
-from sparse_wsi_vit.models.nsa_kernels.fla_utils import autotune_cache_kwargs, input_guard
+from sparse_wsi_vit.models.nsa_kernels.fla_utils import (
+    autotune_cache_kwargs,
+    input_guard,
+)
 
 
 # `triton.jit`'ed functions can be auto-tuned by using the `triton.autotune` decorator, which consumes:
@@ -22,20 +25,38 @@ from sparse_wsi_vit.models.nsa_kernels.fla_utils import autotune_cache_kwargs, i
 #       meta-parameters (e.g., `BM`) and compilation options (e.g., `num_warps`) to try
 #   - An auto-tuning *key* whose change in values will trigger evaluation of all the
 #       provided configs
-@triton.heuristics({
-    'HAS_ALPHA': lambda args: args['alpha'] is not None,
-    'HAS_BETA': lambda args: args['beta'] is not None,
-})
+@triton.heuristics(
+    {
+        "HAS_ALPHA": lambda args: args["alpha"] is not None,
+        "HAS_BETA": lambda args: args["beta"] is not None,
+    }
+)
 @triton.autotune(
     configs=[
-        triton.Config({'BM': 128, 'BK': 64, 'BN': 256, 'G': 4}, num_stages=3, num_warps=8),
-        triton.Config({'BM': 64, 'BK': 32, 'BN': 256, 'G': 4}, num_stages=4, num_warps=4),
-        triton.Config({'BM': 128, 'BK': 32, 'BN': 128, 'G': 4}, num_stages=4, num_warps=4),
-        triton.Config({'BM': 128, 'BK': 32, 'BN': 64, 'G': 4}, num_stages=4, num_warps=4),
-        triton.Config({'BM': 64, 'BK': 32, 'BN': 128, 'G': 4}, num_stages=4, num_warps=4),
-        triton.Config({'BM': 128, 'BK': 32, 'BN': 32, 'G': 4}, num_stages=4, num_warps=4),
-        triton.Config({'BM': 64, 'BK': 32, 'BN': 32, 'G': 4}, num_stages=5, num_warps=2),
-        triton.Config({'BM': 32, 'BK': 32, 'BN': 64, 'G': 4}, num_stages=5, num_warps=2),
+        triton.Config(
+            {"BM": 128, "BK": 64, "BN": 256, "G": 4}, num_stages=3, num_warps=8
+        ),
+        triton.Config(
+            {"BM": 64, "BK": 32, "BN": 256, "G": 4}, num_stages=4, num_warps=4
+        ),
+        triton.Config(
+            {"BM": 128, "BK": 32, "BN": 128, "G": 4}, num_stages=4, num_warps=4
+        ),
+        triton.Config(
+            {"BM": 128, "BK": 32, "BN": 64, "G": 4}, num_stages=4, num_warps=4
+        ),
+        triton.Config(
+            {"BM": 64, "BK": 32, "BN": 128, "G": 4}, num_stages=4, num_warps=4
+        ),
+        triton.Config(
+            {"BM": 128, "BK": 32, "BN": 32, "G": 4}, num_stages=4, num_warps=4
+        ),
+        triton.Config(
+            {"BM": 64, "BK": 32, "BN": 32, "G": 4}, num_stages=5, num_warps=2
+        ),
+        triton.Config(
+            {"BM": 32, "BK": 32, "BN": 64, "G": 4}, num_stages=5, num_warps=2
+        ),
         # Good config for fp8 inputs.
         # triton.Config({'BM': 128, 'BK': 128, 'BN': 256, 'G': 4}, num_stages=3, num_warps=8),
         # triton.Config({'BM': 256, 'BK': 128, 'BN': 128, 'G': 4}, num_stages=3, num_warps=8),
@@ -46,7 +67,7 @@ from sparse_wsi_vit.models.nsa_kernels.fla_utils import autotune_cache_kwargs, i
         # triton.Config({'BM': 64, 'BK': 64, 'BN': 128, 'G': 4}, num_stages=4, num_warps=4),
         # triton.Config({'BM': 128, 'BK': 64, 'BN': 32, 'G': 4}, num_stages=4, num_warps=4)
     ],
-    key=['M', 'N', 'K'],
+    key=["M", "N", "K"],
     **autotune_cache_kwargs,
 )
 @triton.jit
@@ -65,9 +86,14 @@ def matmul_kernel(
     # The stride variables represent how much to increase the ptr by when moving by 1
     # element in a particular dimension. E.g. `s_am` is how much to increase `a`
     # by to get the element one row down (A has M rows).
-    stride_ab, stride_am, stride_ak,  # a: batch, M, K
-    stride_bk, stride_bn,             # b: K, N
-    stride_cb, stride_cm, stride_cn,  # c: batch, M, N
+    stride_ab,
+    stride_am,
+    stride_ak,  # a: batch, M, K
+    stride_bk,
+    stride_bn,  # b: K, N
+    stride_cb,
+    stride_cm,
+    stride_cn,  # c: batch, M, N
     # Meta-parameters
     BM: tl.constexpr,
     BK: tl.constexpr,
@@ -139,7 +165,11 @@ def matmul_kernel(
         b_c *= tl.load(alpha)
 
     if HAS_INPUT:
-        p_i = input + (stride_cm * o_cm[:, None] if X_DIM == 2 else 0) + stride_cn * o_cn[None, :]
+        p_i = (
+            input
+            + (stride_cm * o_cm[:, None] if X_DIM == 2 else 0)
+            + stride_cn * o_cn[None, :]
+        )
         mask_p = (o_cn[None, :] < N) if X_DIM == 1 else mask
         b_i = tl.load(p_i, mask=mask_p, other=0.0).to(tl.float32)
         if HAS_BETA:
@@ -179,10 +209,12 @@ def relu(x):
 
 
 @input_guard
-def matmul(a, b, activation=''):
+def matmul(a, b, activation=""):
     assert a.dim() in [2, 3], "a must be 2D or 3D"
     assert b.dim() == 2, "b must be 2D"
-    assert a.shape[-1] == b.shape[0], f"Incompatible dimensions: A {a.shape}, B {b.shape}"
+    assert a.shape[-1] == b.shape[0], (
+        f"Incompatible dimensions: A {a.shape}, B {b.shape}"
+    )
 
     if a.dim() == 2:
         a_dim = 2
@@ -196,13 +228,27 @@ def matmul(a, b, activation=''):
     assert K_b == K, f"Incompatible K dimension: A {K} vs B {K_b}"
     c = a.new_empty(B, M, N)
 
-    def grid(meta): return (B, triton.cdiv(M, meta['BM']), triton.cdiv(N, meta['BN']))
+    def grid(meta):
+        return (B, triton.cdiv(M, meta["BM"]), triton.cdiv(N, meta["BN"]))
+
     matmul_kernel[grid](
-        a, b, c, None, None, None,
-        M, N, K,
-        a.stride(0), a.stride(1), a.stride(2),  # stride_ab, stride_am, stride_ak
-        b.stride(0), b.stride(1),               # stride_bk, stride_bn (b.dim() == 2)
-        c.stride(0), c.stride(1), c.stride(2),  # stride_cb, stride_cm, stride_cn
+        a,
+        b,
+        c,
+        None,
+        None,
+        None,
+        M,
+        N,
+        K,
+        a.stride(0),
+        a.stride(1),
+        a.stride(2),  # stride_ab, stride_am, stride_ak
+        b.stride(0),
+        b.stride(1),  # stride_bk, stride_bn (b.dim() == 2)
+        c.stride(0),
+        c.stride(1),
+        c.stride(2),  # stride_cb, stride_cm, stride_cn
         ACTIVATION=activation,
         ALLOW_TF32=allow_tf32,
         HAS_INPUT=False,
@@ -220,7 +266,9 @@ def addmm(
 ) -> torch.Tensor:
     assert a.dim() in [2, 3], "a must be 2D or 3D"
     assert b.dim() == 2, "b must be 2D"
-    assert a.shape[-1] == b.shape[0], f"Incompatible dimensions: A {a.shape}, B {b.shape}"
+    assert a.shape[-1] == b.shape[0], (
+        f"Incompatible dimensions: A {a.shape}, B {b.shape}"
+    )
 
     if a.dim() == 2:
         a_dim = 2
@@ -234,13 +282,27 @@ def addmm(
     assert K_b == K, f"Incompatible K dimension: A {K} vs B {K_b}"
     c = a.new_empty(B, M, N)
 
-    def grid(meta): return (B, triton.cdiv(M, meta['BM']), triton.cdiv(N, meta['BN']))
+    def grid(meta):
+        return (B, triton.cdiv(M, meta["BM"]), triton.cdiv(N, meta["BN"]))
+
     matmul_kernel[grid](
-        a, b, c, x, alpha, beta,
-        M, N, K,
-        a.stride(0), a.stride(1), a.stride(2),  # stride_ab, stride_am, stride_ak
-        b.stride(0), b.stride(1),               # stride_bk, stride_bn (b.dim() == 2)
-        c.stride(0), c.stride(1), c.stride(2),  # stride_cb, stride_cm, stride_cn
+        a,
+        b,
+        c,
+        x,
+        alpha,
+        beta,
+        M,
+        N,
+        K,
+        a.stride(0),
+        a.stride(1),
+        a.stride(2),  # stride_ab, stride_am, stride_ak
+        b.stride(0),
+        b.stride(1),  # stride_bk, stride_bn (b.dim() == 2)
+        c.stride(0),
+        c.stride(1),
+        c.stride(2),  # stride_cb, stride_cm, stride_cn
         ACTIVATION=None,
         ALLOW_TF32=allow_tf32,
         HAS_INPUT=True,

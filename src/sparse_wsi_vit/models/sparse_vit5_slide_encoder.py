@@ -12,7 +12,9 @@ from torch import Tensor
 from torch.utils.checkpoint import checkpoint
 
 from sparse_wsi_vit.models.vit_5.models_vit5 import Block, RMSNorm
-from sparse_wsi_vit.models.deepseek_sparse_attention import DeepseekSparseAttentionAdapter
+from sparse_wsi_vit.models.deepseek_sparse_attention import (
+    DeepseekSparseAttentionAdapter,
+)
 from sparse_wsi_vit.models.static_sparse_attention import (
     StaticSparseAttentionAdapter,
     hilbert_sort,
@@ -20,6 +22,7 @@ from sparse_wsi_vit.models.static_sparse_attention import (
 
 
 _SPARSE_ATTN_TYPES = ("static", "dsa")
+
 
 class SparseViT5SlideEncoder(nn.Module):
     """WSI slide encoder: ViT-5 blocks with configurable sparse attention.
@@ -94,7 +97,7 @@ class SparseViT5SlideEncoder(nn.Module):
         # Memory
         gradient_checkpointing: bool = False,
         # patch_ordering
-        use_hilbert_sort = False
+        use_hilbert_sort=False,
     ) -> None:
         super().__init__()
 
@@ -150,28 +153,30 @@ class SparseViT5SlideEncoder(nn.Module):
 
         norm_layer = partial(RMSNorm, eps=1e-6)
 
-        self.blocks = nn.ModuleList([
-            Block(
-                dim=embed_dim,
-                num_heads=num_heads,
-                mlp_ratio=mlp_ratio,
-                qkv_bias=False,
-                drop=proj_dropout,
-                attn_drop=attn_dropout,
-                drop_path=drop_path_rate,
-                norm_layer=norm_layer,
-                Attention_block=attn_block,
-                init_values=init_scale,
-                layer_scale=layer_scale,
-                # Disable ViT-5 features handled inside the sparse attention modules
-                flash=False,
-                rope_size=0,
-                rope_reg_size=0,
-                num_registers=0,
-                qk_norm=False,
-            )
-            for _ in range(depth)
-        ])
+        self.blocks = nn.ModuleList(
+            [
+                Block(
+                    dim=embed_dim,
+                    num_heads=num_heads,
+                    mlp_ratio=mlp_ratio,
+                    qkv_bias=False,
+                    drop=proj_dropout,
+                    attn_drop=attn_dropout,
+                    drop_path=drop_path_rate,
+                    norm_layer=norm_layer,
+                    Attention_block=attn_block,
+                    init_values=init_scale,
+                    layer_scale=layer_scale,
+                    # Disable ViT-5 features handled inside the sparse attention modules
+                    flash=False,
+                    rope_size=0,
+                    rope_reg_size=0,
+                    num_registers=0,
+                    qk_norm=False,
+                )
+                for _ in range(depth)
+            ]
+        )
 
         self.norm = norm_layer(embed_dim)
 
@@ -208,8 +213,10 @@ class SparseViT5SlideEncoder(nn.Module):
             x = x.gather(1, sort_idx.unsqueeze(-1).expand_as(x))
             coords = coords.gather(1, sort_idx.unsqueeze(-1).expand(-1, -1, 2))
 
-        cls = self.cls_tokens.expand(batch_size, -1, -1)  # (batch_size, num_cls, embed_dim)
-        x = torch.cat([cls, x], dim=1)                     # (batch_size, num_cls + patch_len, embed_dim)
+        cls = self.cls_tokens.expand(
+            batch_size, -1, -1
+        )  # (batch_size, num_cls, embed_dim)
+        x = torch.cat([cls, x], dim=1)  # (batch_size, num_cls + patch_len, embed_dim)
 
         for block in self.blocks:
             if self.gradient_checkpointing and self.training:
@@ -219,8 +226,10 @@ class SparseViT5SlideEncoder(nn.Module):
 
         x = self.norm(x)
 
-        cls_tokens = x[:, : self.num_cls]                          # (batch_size, num_cls, embed_dim)
-        weights = torch.softmax(self.cls_pool(cls_tokens), dim=1)  # (batch_size, num_cls, 1)
-        cls_pooled = (weights * cls_tokens).sum(dim=1)             # (batch_size, embed_dim)
+        cls_tokens = x[:, : self.num_cls]  # (batch_size, num_cls, embed_dim)
+        weights = torch.softmax(
+            self.cls_pool(cls_tokens), dim=1
+        )  # (batch_size, num_cls, 1)
+        cls_pooled = (weights * cls_tokens).sum(dim=1)  # (batch_size, embed_dim)
 
         return {"logits": self.head(cls_pooled)}

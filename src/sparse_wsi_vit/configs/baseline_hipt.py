@@ -26,7 +26,7 @@ FEATURES_DIR = "/scratch-shared/scur0097/camelyon-emb"
 BATCH_SIZE = 1  # Standard for MIL bags
 NUM_WORKERS = 0
 IN_FEATURES = 1280
-OUT_FEATURES = 2 
+OUT_FEATURES = 2
 PRECISION = "32-true"
 
 TRAINING_ITERATIONS = 10_000
@@ -51,10 +51,10 @@ def get_config() -> ExperimentConfig:
         label_col_name="label",  # Changed from 'label' to an actual column present in the CSV
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
-        output_channels = OUT_FEATURES,
-        features_name = "cls_224x224",
-        coords_name = "coords_224x224",
-        flatten_block = False,
+        output_channels=OUT_FEATURES,
+        features_name="cls_224x224",
+        coords_name="coords_224x224",
+        flatten_block=False,
     )
 
     # Network: The Standard HIPT baseline
@@ -94,9 +94,7 @@ def get_config() -> ExperimentConfig:
 
     # W&B Logging
     config.wandb = WandbConfig(
-        project="wsi-classification",
-        job_group="baseline_hipt",
-        entity="dl2-2026"
+        project="wsi-classification", job_group="baseline_hipt", entity="dl2-2026"
     )
 
     return config

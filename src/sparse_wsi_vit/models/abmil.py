@@ -33,13 +33,14 @@ class ABMIL(nn.Module):
         self.in_features = in_features
 
         eff = input_proj_dim if input_proj_dim is not None else in_features
-        self.input_proj = nn.Sequential(nn.Linear(in_features, eff), nn.ReLU()) \
-            if input_proj_dim is not None else None
+        self.input_proj = (
+            nn.Sequential(nn.Linear(in_features, eff), nn.ReLU())
+            if input_proj_dim is not None
+            else None
+        )
 
         self.attention_v = nn.Sequential(nn.Linear(eff, hidden_dim), nn.Tanh())
-        self.attention_u = nn.Sequential(
-            nn.Linear(eff, hidden_dim), nn.Sigmoid()
-        )
+        self.attention_u = nn.Sequential(nn.Linear(eff, hidden_dim), nn.Sigmoid())
         self.attention_weights = nn.Linear(hidden_dim, num_branches)
 
         self.classifier = nn.Sequential(
@@ -49,10 +50,12 @@ class ABMIL(nn.Module):
             nn.Linear(eff // 2, out_features),
         )
 
-    def forward(self,
-                x: torch.Tensor,
-                lengths: torch.Tensor | None = None,
-                return_attention: bool = False) -> dict:
+    def forward(
+        self,
+        x: torch.Tensor,
+        lengths: torch.Tensor | None = None,
+        return_attention: bool = False,
+    ) -> dict:
         """Run a forward pass over a feature bag.
 
         Args:

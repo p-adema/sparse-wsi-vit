@@ -17,10 +17,9 @@ NUM_WARPS_AUTOTUNE = [1, 2, 4, 8, 16] if IS_AMD else [1, 2, 4, 8, 16, 32]
 
 @triton.autotune(
     configs=[
-        triton.Config({}, num_warps=num_warps)
-        for num_warps in NUM_WARPS_AUTOTUNE
+        triton.Config({}, num_warps=num_warps) for num_warps in NUM_WARPS_AUTOTUNE
     ],
-    key=['D'],
+    key=["D"],
     **autotune_cache_kwargs,
 )
 @triton.jit
@@ -34,7 +33,7 @@ def softmax_fwd_kernel(
     o_d = tl.arange(0, B)
     m_d = o_d < D
 
-    b_x = tl.load(x + i_n * D + o_d, mask=m_d, other=-float('inf'))
+    b_x = tl.load(x + i_n * D + o_d, mask=m_d, other=-float("inf"))
     b_m = tl.max(b_x, 0)
     b_x = exp(b_x - b_m)
     b_p = b_x / tl.sum(b_x, 0)
@@ -44,10 +43,9 @@ def softmax_fwd_kernel(
 
 @triton.autotune(
     configs=[
-        triton.Config({}, num_warps=num_warps)
-        for num_warps in NUM_WARPS_AUTOTUNE
+        triton.Config({}, num_warps=num_warps) for num_warps in NUM_WARPS_AUTOTUNE
     ],
-    key=['D'],
+    key=["D"],
     **autotune_cache_kwargs,
 )
 @triton.jit
@@ -62,8 +60,8 @@ def softmax_bwd_kernel(
     o_d = tl.arange(0, B)
     m_d = o_d < D
 
-    b_p = tl.load(p + i_n * D + o_d, mask=m_d, other=0.)
-    b_dp = tl.load(dp + i_n * D + o_d, mask=m_d, other=0.)
+    b_p = tl.load(p + i_n * D + o_d, mask=m_d, other=0.0)
+    b_dp = tl.load(dp + i_n * D + o_d, mask=m_d, other=0.0)
     b_pp = tl.sum(b_p * b_dp, 0)
     b_ds = b_p * b_dp - b_p * b_pp
     tl.store(ds + i_n * D + o_d, b_ds.to(ds.dtype.element_ty), mask=m_d)

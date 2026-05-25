@@ -13,15 +13,15 @@ import triton
 import triton.language as tl
 
 from .index import prepare_lens
-from sparse_wsi_vit.models.nsa_kernels.fla_utils import autotune_cache_kwargs, input_guard
+from sparse_wsi_vit.models.nsa_kernels.fla_utils import (
+    autotune_cache_kwargs,
+    input_guard,
+)
 
 
 @triton.autotune(
-    configs=[
-        triton.Config({}, num_warps=num_warps)
-        for num_warps in [4, 8, 16, 32]
-    ],
-    key=['D', 'PADDING_SIDE', 'PACK'],
+    configs=[triton.Config({}, num_warps=num_warps) for num_warps in [4, 8, 16, 32]],
+    key=["D", "PADDING_SIDE", "PACK"],
     **autotune_cache_kwargs,
 )
 @triton.jit
@@ -39,7 +39,7 @@ def packunpack_sequence_kernel(
     bos, eos = tl.load(cu_seqlens + i_b), tl.load(cu_seqlens + i_b + 1)
 
     T = eos - bos
-    if PADDING_SIDE == 'left':
+    if PADDING_SIDE == "left":
         NP = S - T
         if i_s < NP:
             return
@@ -91,7 +91,11 @@ def unpack_sequence_fwdbwd(
     desired_shape: torch.Size,
 ) -> torch.Tensor:
     if desired_shape is None:
-        desired_shape = (len(cu_seqlens) - 1, prepare_lens(cu_seqlens).max().item(), *x.shape[1:])
+        desired_shape = (
+            len(cu_seqlens) - 1,
+            prepare_lens(cu_seqlens).max().item(),
+            *x.shape[1:],
+        )
     y = torch.zeros(desired_shape, device=x.device, dtype=x.dtype)
     B, S = y.shape[:2]
     D = y.numel() // (B * S)
@@ -112,7 +116,6 @@ def unpack_sequence_fwdbwd(
 
 
 class PackSequenceFunction(torch.autograd.Function):
-
     @staticmethod
     @input_guard
     def forward(
@@ -121,7 +124,7 @@ class PackSequenceFunction(torch.autograd.Function):
         cu_seqlens: torch.Tensor,
         padding_side: str,
     ) -> torch.Tensor:
-        assert padding_side in ['left', 'right']
+        assert padding_side in ["left", "right"]
         assert x.ndim >= 2
 
         ctx.cu_seqlens = cu_seqlens
@@ -148,7 +151,6 @@ class PackSequenceFunction(torch.autograd.Function):
 
 
 class UnpackSequenceFunction(torch.autograd.Function):
-
     @staticmethod
     @input_guard
     def forward(
@@ -158,7 +160,7 @@ class UnpackSequenceFunction(torch.autograd.Function):
         padding_side: str,
         desired_shape: torch.Size | None = None,
     ) -> torch.Tensor:
-        assert padding_side in ['left', 'right']
+        assert padding_side in ["left", "right"]
         assert x.ndim >= 2
         if desired_shape is not None:
             assert desired_shape[0] == cu_seqlens.shape[0] - 1
@@ -189,7 +191,7 @@ class UnpackSequenceFunction(torch.autograd.Function):
 def pack_sequence(
     x: torch.Tensor,
     cu_seqlens: torch.Tensor,
-    padding_side: str = 'left',
+    padding_side: str = "left",
 ) -> torch.Tensor:
     return PackSequenceFunction.apply(
         x,
@@ -201,7 +203,7 @@ def pack_sequence(
 def unpack_sequence(
     x: torch.Tensor,
     cu_seqlens: torch.Tensor,
-    padding_side: str = 'left',
+    padding_side: str = "left",
     desired_shape: torch.Size | None = None,
 ) -> torch.Tensor:
     return UnpackSequenceFunction.apply(

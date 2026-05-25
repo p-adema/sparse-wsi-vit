@@ -65,7 +65,7 @@ def get_config() -> ExperimentConfig:
     # Lightning wrapper mappings
     config.lightning_wrapper_class = LazyConfig(WSIAttnWrapper)(
         use_bce_loss=(OUT_FEATURES == 1),
-        training_crop_tokens=2 ** 13 - 5,  # 8187 (+ CLS + 4REG = 2**13),
+        training_crop_tokens=2**13 - 5,  # 8187 (+ CLS + 4REG = 2**13),
     )
 
     # Optimizer
@@ -92,9 +92,7 @@ def get_config() -> ExperimentConfig:
 
     # W&B Logging
     config.wandb = WandbConfig(
-        project="wsi-classification",
-        job_group="baseline_vit5",
-        entity="dl2-2026"
+        project="wsi-classification", job_group="baseline_vit5", entity="dl2-2026"
     )
 
     return config

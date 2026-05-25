@@ -24,15 +24,19 @@ from packaging import version
 logger = logging.getLogger(__name__)
 
 FLA_CI_ENV = os.getenv("FLA_CI_ENV") == "1"
-FLA_CACHE_RESULTS = os.getenv('FLA_CACHE_RESULTS', '1') == '1'
-FLA_DISABLE_TENSOR_CACHE = os.getenv('FLA_DISABLE_TENSOR_CACHE', '0') == '1'
+FLA_CACHE_RESULTS = os.getenv("FLA_CACHE_RESULTS", "1") == "1"
+FLA_DISABLE_TENSOR_CACHE = os.getenv("FLA_DISABLE_TENSOR_CACHE", "0") == "1"
 TRITON_ABOVE_3_4_0 = version.parse(triton.__version__) >= version.parse("3.4.0")
 TRITON_ABOVE_3_5_1 = version.parse(triton.__version__) >= version.parse("3.5.1")
 
 
-SUPPORTS_AUTOTUNE_CACHE = "cache_results" in inspect.signature(triton.autotune).parameters
+SUPPORTS_AUTOTUNE_CACHE = (
+    "cache_results" in inspect.signature(triton.autotune).parameters
+)
 
-autotune_cache_kwargs = {"cache_results": FLA_CACHE_RESULTS} if SUPPORTS_AUTOTUNE_CACHE else {}
+autotune_cache_kwargs = (
+    {"cache_results": FLA_CACHE_RESULTS} if SUPPORTS_AUTOTUNE_CACHE else {}
+)
 
 
 @lru_cache(maxsize=1)
@@ -43,11 +47,12 @@ def check_environments():
     This function's body only runs once due to lru_cache.
     """
     # Check Operating System
-    if sys.platform == 'win32':
+    if sys.platform == "win32":
         # Check if triton-windows is installed
         try:
             from importlib.metadata import PackageNotFoundError, metadata
-            metadata('triton-windows')
+
+            metadata("triton-windows")
             # triton-windows is installed, no warning needed
         except PackageNotFoundError:
             logger.warning(
@@ -83,11 +88,11 @@ check_environments()
 
 
 def get_abs_err(x, y):
-    return (x.detach()-y.detach()).flatten().abs().max().item()
+    return (x.detach() - y.detach()).flatten().abs().max().item()
 
 
 def get_err_ratio(x, y):
-    err = (x.detach()-y.detach()).flatten().square().mean().sqrt().item()
+    err = (x.detach() - y.detach()).flatten().square().mean().sqrt().item()
     base = (x.detach()).flatten().square().mean().sqrt().item()
     return err / (base + 1e-8)
 
@@ -141,8 +146,9 @@ def tensor_cache(
 
         if last_args is not None and last_kwargs is not None:
             if len(args) == len(last_args) and len(kwargs) == len(last_kwargs):
-                if all(a is b for a, b in zip(args, last_args, strict=False)) and \
-                        all(k in last_kwargs and v is last_kwargs[k] for k, v in kwargs.items()):
+                if all(a is b for a, b in zip(args, last_args, strict=False)) and all(
+                    k in last_kwargs and v is last_kwargs[k] for k, v in kwargs.items()
+                ):
                     return last_result
 
         result = fn(*args, **kwargs)
@@ -156,7 +162,10 @@ def input_guard(
     fn: Callable[..., torch.Tensor] | None = None,
     *,
     no_guard_contiguous: bool | list[str] = False,
-) -> Callable[[Callable[..., torch.Tensor]], Callable[..., torch.Tensor]] | Callable[..., torch.Tensor]:
+) -> (
+    Callable[[Callable[..., torch.Tensor]], Callable[..., torch.Tensor]]
+    | Callable[..., torch.Tensor]
+):
     """
     A decorator to make sure all input tensors are contiguous and set the device based on input tensors.
 
@@ -241,15 +250,27 @@ def require_version(version, hint):
     """
     Perform a runtime check of the dependency versions, using the exact same syntax used by pip.
     """
+
     def decorator(fn):
         @functools.wraps(fn)
         def wrapper(ctx, *args, **kwargs):
             from transformers.utils.versions import require_version
+
             require_version(version, hint)
-            return fn(ctx,
-                      *(i if not isinstance(i, torch.Tensor) else i.contiguous() for i in args),
-                      **{k: (v if not isinstance(v, torch.Tensor) else v.contiguous()) for k, v in kwargs.items()})
+            return fn(
+                ctx,
+                *(
+                    i if not isinstance(i, torch.Tensor) else i.contiguous()
+                    for i in args
+                ),
+                **{
+                    k: (v if not isinstance(v, torch.Tensor) else v.contiguous())
+                    for k, v in kwargs.items()
+                },
+            )
+
         return wrapper
+
     return decorator
 
 
@@ -357,7 +378,9 @@ def deprecate_kwarg(
 
             # deprecated kwarg and its new version are set for function call -> replace it with new name
             if old_name in kwargs and new_name in kwargs:
-                minimum_action = Action.RAISE if raise_if_both_names else Action.NOTIFY_ALWAYS
+                minimum_action = (
+                    Action.RAISE if raise_if_both_names else Action.NOTIFY_ALWAYS
+                )
                 message = (
                     f"Both `{old_name}` and `{new_name}` are set for `{func_name}`. "
                     f"Using `{new_name}={kwargs[new_name]}` and ignoring deprecated `{old_name}={kwargs[old_name]}`."
@@ -376,7 +399,9 @@ def deprecate_kwarg(
             # deprecated kwarg is not set for function call and new name is not specified -> just notify
             elif old_name in kwargs:
                 minimum_action = Action.NOTIFY
-                message = f"`{old_name}` is deprecated {version_message} for `{func_name}`."
+                message = (
+                    f"`{old_name}` is deprecated {version_message} for `{func_name}`."
+                )
 
             if message is not None and additional_message is not None:
                 message = f"{message} {additional_message}"
@@ -390,7 +415,10 @@ def deprecate_kwarg(
 
                 # change to NOTIFY -> NONE if specified (NOTIFY_ALWAYS can't be changed to NONE)
                 # in case we want to ignore notifications for already deprecated arguments
-                elif not warn_if_greater_or_equal_version and minimum_action == Action.NOTIFY:
+                elif (
+                    not warn_if_greater_or_equal_version
+                    and minimum_action == Action.NOTIFY
+                ):
                     minimum_action = Action.NONE
 
             # raise error or notify user
@@ -410,26 +438,33 @@ def deprecate_kwarg(
 def checkpoint(fn):
     def wrapper(*args, **kwargs):
         return torch.utils.checkpoint.checkpoint(fn, *args, **kwargs)
+
     return wrapper
 
 
 @functools.cache
-def check_pytorch_version(version_s: str = '2.4') -> bool:
+def check_pytorch_version(version_s: str = "2.4") -> bool:
     return version.parse(torch.__version__) >= version.parse(version_s)
 
 
 def _cpu_device_warning():
-    warnings.warn(('Triton is not supported on current platform, roll back to CPU.'), stacklevel=1)
+    warnings.warn(
+        ("Triton is not supported on current platform, roll back to CPU."), stacklevel=1
+    )
 
 
 @functools.cache
 def get_multiprocessor_count(tensor_idx: int = 0) -> int:
     try:
-        return triton.runtime.driver.active.utils.get_device_properties(tensor_idx)['multiprocessor_count']
+        return triton.runtime.driver.active.utils.get_device_properties(tensor_idx)[
+            "multiprocessor_count"
+        ]
     except BaseException:
         # Maybe we use a NPU device.
-        if triton.runtime.driver.active.get_current_target().backend == 'npu':
-            return triton.runtime.driver.active.utils.get_device_properties(tensor_idx)['num_vectorcore']
+        if triton.runtime.driver.active.get_current_target().backend == "npu":
+            return triton.runtime.driver.active.utils.get_device_properties(tensor_idx)[
+                "num_vectorcore"
+            ]
         else:
             return 1
 
@@ -440,62 +475,76 @@ def get_available_device() -> str:
         return triton.runtime.driver.active.get_current_target().backend
     except BaseException:
         _cpu_device_warning()
-        return 'cpu'
+        return "cpu"
 
 
 def map_triton_backend_to_torch_device() -> str:
-    backend = get_available_device()        # 'cuda' | 'hip' | 'xpu' | 'cpu' | ...
-    return {'cuda': 'cuda', 'hip': 'cuda', 'xpu': 'xpu'}.get(backend, backend)
+    backend = get_available_device()  # 'cuda' | 'hip' | 'xpu' | 'cpu' | ...
+    return {"cuda": "cuda", "hip": "cuda", "xpu": "xpu"}.get(backend, backend)
 
 
 # For AMD GPUs, the triton backend is 'hip', while for Nvidia GPUs, the triton backend is 'cuda'.
 # However, the torch backend is 'cuda' for both Nvidia and AMD GPUs.
 # Therefore, we need to check the triton backend to determine the actual GPU vendor.
-device = get_available_device() if get_available_device() != 'hip' else 'cuda'
+device = get_available_device() if get_available_device() != "hip" else "cuda"
 device_torch_lib = getattr(torch, device)
 device_platform = get_available_device()
 device_name = map_triton_backend_to_torch_device()
 
-IS_AMD = (device_platform == 'hip')
-IS_INTEL = (device_platform == 'xpu')
-IS_NVIDIA = (device_platform == 'cuda')
-IS_INTEL_ALCHEMIST = (IS_INTEL and 'Intel(R) Arc(TM) A' in torch.xpu.get_device_name(0))
-IS_NVIDIA_HOPPER = (IS_NVIDIA and ('NVIDIA H' in torch.cuda.get_device_name(0) or torch.cuda.get_device_capability()[0] == 9))
-IS_NVIDIA_BLACKWELL = (IS_NVIDIA and torch.cuda.get_device_capability()[0] == 10)
-USE_CUDA_GRAPH = (IS_NVIDIA and os.environ.get('FLA_USE_CUDA_GRAPH', '0') == '1')
+IS_AMD = device_platform == "hip"
+IS_INTEL = device_platform == "xpu"
+IS_NVIDIA = device_platform == "cuda"
+IS_INTEL_ALCHEMIST = IS_INTEL and "Intel(R) Arc(TM) A" in torch.xpu.get_device_name(0)
+IS_NVIDIA_HOPPER = IS_NVIDIA and (
+    "NVIDIA H" in torch.cuda.get_device_name(0)
+    or torch.cuda.get_device_capability()[0] == 9
+)
+IS_NVIDIA_BLACKWELL = IS_NVIDIA and torch.cuda.get_device_capability()[0] == 10
+USE_CUDA_GRAPH = IS_NVIDIA and os.environ.get("FLA_USE_CUDA_GRAPH", "0") == "1"
 
 # Nvidia Ampere or newer, haven't check AMD and intel yet.
-IS_TF32_SUPPORTED = (IS_NVIDIA and torch.cuda.get_device_capability(0)[0] >= 8)
-IS_GATHER_SUPPORTED = hasattr(triton.language, 'gather')
-IS_TMA_SUPPORTED = (IS_NVIDIA and torch.cuda.get_device_capability(0)[0] >= 9) \
-    and os.environ.get('FLA_USE_TMA', '0') == '1' and \
-    (hasattr(triton.language, '_experimental_make_tensor_descriptor') or hasattr(triton.language, 'make_tensor_descriptor'))
+IS_TF32_SUPPORTED = IS_NVIDIA and torch.cuda.get_device_capability(0)[0] >= 8
+IS_GATHER_SUPPORTED = hasattr(triton.language, "gather")
+IS_TMA_SUPPORTED = (
+    (IS_NVIDIA and torch.cuda.get_device_capability(0)[0] >= 9)
+    and os.environ.get("FLA_USE_TMA", "0") == "1"
+    and (
+        hasattr(triton.language, "_experimental_make_tensor_descriptor")
+        or hasattr(triton.language, "make_tensor_descriptor")
+    )
+)
 
 if IS_NVIDIA and not IS_TF32_SUPPORTED:
     # Make old card happy, since triton will use tf32 by default.
     # This is a workaround for old nvidia card.
-    os.environ['TRITON_F32_DEFAULT'] = 'ieee'
+    os.environ["TRITON_F32_DEFAULT"] = "ieee"
 
 
 def _default_alloc_fn(size: int, alignment: int, stream: int | None):
-    return torch.empty(size, device=torch.device(device_name, device_torch_lib.current_device()), dtype=torch.int8)
+    return torch.empty(
+        size,
+        device=torch.device(device_name, device_torch_lib.current_device()),
+        dtype=torch.int8,
+    )
 
 
 if IS_TMA_SUPPORTED:
-    logger.info('TMA is supported, using TMA by default.')
+    logger.info("TMA is supported, using TMA by default.")
     triton.set_allocator(_default_alloc_fn)
 elif IS_NVIDIA_BLACKWELL:
     # Blackwell (SM 10.0+): Triton compiler may emit global_scratch for
     # autotuned kernels even without TMA. Register a default allocator to
     # prevent NullAllocator crashes. See triton-lang/triton#10002.
-    logger.info('Blackwell detected: registering default global_scratch allocator.')
+    logger.info("Blackwell detected: registering default global_scratch allocator.")
     triton.set_allocator(_default_alloc_fn)
 
 
 def get_all_max_shared_mem():
     try:
         return [
-            triton.runtime.driver.active.utils.get_device_properties(i)['max_shared_mem']
+            triton.runtime.driver.active.utils.get_device_properties(i)[
+                "max_shared_mem"
+            ]
             for i in range(device_torch_lib.device_count())
         ]
     except BaseException:
@@ -504,10 +553,10 @@ def get_all_max_shared_mem():
 
 
 class Backend(Enum):
-    ADA = 101376       # RTX 4090
-    AMPERE = 166912    # A100
-    HOPPER = 232448    # H100
-    DEFAULT = 102400   # Default
+    ADA = 101376  # RTX 4090
+    AMPERE = 166912  # A100
+    HOPPER = 232448  # H100
+    DEFAULT = 102400  # Default
 
     @classmethod
     def get_shared_memory(cls, arch: str) -> int:
@@ -527,15 +576,17 @@ def check_shared_mem(arch: str = "none", tensor_idx: int = 0) -> bool:
         return False
 
 
-if check_pytorch_version('2.4'):
-    device = 'cuda' if device == 'cpu' else device
+if check_pytorch_version("2.4"):
+    device = "cuda" if device == "cpu" else device
     autocast_custom_fwd = functools.partial(torch.amp.custom_fwd, device_type=device)
     autocast_custom_bwd = functools.partial(torch.amp.custom_bwd, device_type=device)
 
     def custom_device_ctx(index: int):
         return device_torch_lib.device(index)
 else:
-    assert device == 'cuda', 'Only cuda device is supported for PyTorch version < 2.4.0.'
+    assert device == "cuda", (
+        "Only cuda device is supported for PyTorch version < 2.4.0."
+    )
     autocast_custom_fwd = device_torch_lib.amp.custom_fwd
     autocast_custom_bwd = device_torch_lib.amp.custom_bwd
 
@@ -546,16 +597,16 @@ else:
 def _register_aliases():
     current_module = sys.modules[__name__]
     for key in (
-        'IS_AMD',
-        'IS_INTEL',
-        'IS_NVIDIA',
-        'IS_INTEL_ALCHEMIST',
-        'IS_NVIDIA_HOPPER',
-        'IS_NVIDIA_BLACKWELL',
-        'USE_CUDA_GRAPH',
-        'IS_TF32_SUPPORTED',
-        'IS_GATHER_SUPPORTED',
-        'IS_TMA_SUPPORTED',
+        "IS_AMD",
+        "IS_INTEL",
+        "IS_NVIDIA",
+        "IS_INTEL_ALCHEMIST",
+        "IS_NVIDIA_HOPPER",
+        "IS_NVIDIA_BLACKWELL",
+        "USE_CUDA_GRAPH",
+        "IS_TF32_SUPPORTED",
+        "IS_GATHER_SUPPORTED",
+        "IS_TMA_SUPPORTED",
     ):
         if hasattr(current_module, key):
             setattr(current_module, key.lower(), getattr(current_module, key))

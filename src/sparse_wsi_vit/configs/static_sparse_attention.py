@@ -3,6 +3,7 @@
 Usage:
     python -m sparse-wsi-vit.experiments.run --config configs/static_sparse_attention_config.py
 """
+
 import os
 import torch
 import datetime
@@ -20,8 +21,11 @@ from sparse_wsi_vit.experiments.default_cfg import (
 from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
 
 from sparse_wsi_vit.models.sparse_vit5_slide_encoder import SparseViT5SlideEncoder
-from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import WSIAttnWrapper
+from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import (
+    WSIAttnWrapper,
+)
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
+
 PIN_MEMORY = True
 
 # ─── Data Details ──────────────────────────────────────────────
@@ -50,49 +54,54 @@ overlap_train_test = test_slides & train_slides
 
 print(f"Train: {len(train_slides)}, Val: {len(val_slides)}, Test: {len(test_slides)}")
 if overlap_train_val or overlap_test_val or overlap_train_test:
-    print("Overlapping slides:", overlap_train_val | overlap_test_val | overlap_train_test)
+    print(
+        "Overlapping slides:", overlap_train_val | overlap_test_val | overlap_train_test
+    )
 
 # ─── Sparse attention type ───────────────────────────────────────────────────
-SPARSE_ATTN="static"
+SPARSE_ATTN = "static"
 
 # ─── Shared hyperparameters ──────────────────────────────────────────────────
-BATCH_SIZE=1
+BATCH_SIZE = 1
 NUM_WORKERS = 8 if FEATURES_SCALE == 224 else 1
-WORKER_PREFETCH=2
-CLASS_WEIGHTS=True
-IN_FEATURES=1280
-OUT_FEATURES=1
-PRECISION="bf16-mixed"
-GRADIENT_CHECKPOINTING=True
+WORKER_PREFETCH = 2
+CLASS_WEIGHTS = True
+IN_FEATURES = 1280
+OUT_FEATURES = 1
+PRECISION = "bf16-mixed"
+GRADIENT_CHECKPOINTING = True
 
-DEPTH=3
-HIDDEN_SIZE=256
-NUM_HEADS=4            # embed_dim // num_heads=64
-ROPE_DYNAMIC_HIGH = 220_000 # should work across the board, since coords are in pixel space
+DEPTH = 3
+HIDDEN_SIZE = 256
+NUM_HEADS = 4  # embed_dim // num_heads=64
+ROPE_DYNAMIC_HIGH = (
+    220_000  # should work across the board, since coords are in pixel space
+)
 
-NUM_CLS=2
-MLP_RATIO=4.0
-PROJ_DROPOUT=0.2
-DROP_PATH_RATE=0.1
-LAYER_SCALE=True
-INIT_SCALE=1e-4
+NUM_CLS = 2
+MLP_RATIO = 4.0
+PROJ_DROPOUT = 0.2
+DROP_PATH_RATE = 0.1
+LAYER_SCALE = True
+INIT_SCALE = 1e-4
 
-TRAINING_ITERATIONS=1000
-WARMUP_ITERATIONS_PERCENTAGE=0.05
-LEARNING_RATE=2e-4
-WEIGHT_DECAY=1e-2
-GRAD_CLIP=1.0
-ACCUMULATE_GRAD_STEPS=5
-PATIENCE = 10 if FEATURES_SCALE*DOWNSCALE_BLOCK < 448 else 30
+TRAINING_ITERATIONS = 1000
+WARMUP_ITERATIONS_PERCENTAGE = 0.05
+LEARNING_RATE = 2e-4
+WEIGHT_DECAY = 1e-2
+GRAD_CLIP = 1.0
+ACCUMULATE_GRAD_STEPS = 5
+PATIENCE = 10 if FEATURES_SCALE * DOWNSCALE_BLOCK < 448 else 30
 MAX_DURATION = datetime.timedelta(hours=9, minutes=30)
 
 
 # ─── StaticSparseAttention-specific ──────────────────────────────────────────
-WINDOW_SIZE=4            # neighbouring chunks on each side
-CHUNK_SIZE=256           # patches per logical chunk (must be multiple of FLEX_BLOCK_SIZE)
-FLEX_BLOCK_SIZE=128      # FlexAttention kernel tile size
-ROPE_THETA=10_000.0
+WINDOW_SIZE = 4  # neighbouring chunks on each side
+CHUNK_SIZE = 256  # patches per logical chunk (must be multiple of FLEX_BLOCK_SIZE)
+FLEX_BLOCK_SIZE = 128  # FlexAttention kernel tile size
+ROPE_THETA = 10_000.0
 USE_HILBERT_SORT = True
+
 
 def get_config() -> ExperimentConfig:
     config = ExperimentConfig()
@@ -117,7 +126,7 @@ def get_config() -> ExperimentConfig:
         pin_memory=PIN_MEMORY,
     )
 
-    config.net=LazyConfig(SparseViT5SlideEncoder)(
+    config.net = LazyConfig(SparseViT5SlideEncoder)(
         in_features=IN_FEATURES,
         out_features=OUT_FEATURES,
         embed_dim=HIDDEN_SIZE,
@@ -138,7 +147,7 @@ def get_config() -> ExperimentConfig:
         layer_scale=LAYER_SCALE,
         init_scale=INIT_SCALE,
         gradient_checkpointing=GRADIENT_CHECKPOINTING,
-        use_hilbert_sort=USE_HILBERT_SORT
+        use_hilbert_sort=USE_HILBERT_SORT,
     )
 
     # Lightning wrapper mappings
@@ -148,7 +157,6 @@ def get_config() -> ExperimentConfig:
         eval_crop_tokens=None,
         compile_mode=None,  # Triton kernels handle their own compilation
     )
-
 
     # Optimizer
     config.optimizer = LazyConfig(torch.optim.AdamW)(
@@ -179,7 +187,7 @@ def get_config() -> ExperimentConfig:
     config.wandb = WandbConfig(
         project="wsi-classification",
         job_group=f"sparse_vit5_{SPARSE_ATTN}",
-        entity="dl2-2026"
+        entity="dl2-2026",
     )
 
     return config

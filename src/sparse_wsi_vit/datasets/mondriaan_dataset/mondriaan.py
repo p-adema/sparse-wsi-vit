@@ -23,9 +23,9 @@ import numpy as np
 
 # ── fixed base colors (used when random_colors=False) ───────────────────────
 # Mean of {RED, CYAN, GREEN, MAGENTA} = (0.5, 0.5, 0.5) under any permutation.
-RED     = np.array([1.0, 0.0, 0.0], dtype=np.float32)
-CYAN    = np.array([0.0, 1.0, 1.0], dtype=np.float32)
-GREEN   = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+RED = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+CYAN = np.array([0.0, 1.0, 1.0], dtype=np.float32)
+GREEN = np.array([0.0, 1.0, 0.0], dtype=np.float32)
 MAGENTA = np.array([1.0, 0.0, 1.0], dtype=np.float32)
 
 _R, _C, _G, _M = RED, CYAN, GREEN, MAGENTA
@@ -42,7 +42,12 @@ PATTERNED_VOCAB = [
     [_C, _M, _G, _R],  # 5
 ]
 PATTERNED_NAMES = [
-    "RC/GM", "CR/MG", "GM/RC", "MG/CR", "RG/MC", "CM/GR",
+    "RC/GM",
+    "CR/MG",
+    "GM/RC",
+    "MG/CR",
+    "RG/MC",
+    "CM/GR",
 ]
 
 # ── permutation indices shared between fixed and random-color modes ──────────
@@ -71,6 +76,7 @@ SOLID_NAMES = ["R", "C", "G", "M"]
 
 # ── generator ─────────────────────────────────────────────────────────────────
 
+
 class MondriaanGenerator:
     """Synthetic pixel-level pattern-matching benchmark generator."""
 
@@ -94,8 +100,7 @@ class MondriaanGenerator:
             attempts += 1
             y = random.choice(grid)
             x = random.choice(grid)
-            if any((y - py) ** 2 + (x - px) ** 2 < min_sep ** 2
-                   for py, px in positions):
+            if any((y - py) ** 2 + (x - px) ** 2 < min_sep**2 for py, px in positions):
                 continue
             positions.append((y, x))
         return positions
@@ -138,21 +143,28 @@ class MondriaanGenerator:
             target_label = random.randint(0, 1)
 
         if random_colors and object_type == "patterned":
+
             def _rand_pat():
                 return np.random.uniform(0, 1, size=(4, 3)).astype(np.float32)
+
             if target_label == 1:
                 pair_pat = _rand_pat()
-                entries = [(pair_pat, 0), (pair_pat, 0), (_rand_pat(), 1), (_rand_pat(), 2)]
+                entries = [
+                    (pair_pat, 0),
+                    (pair_pat, 0),
+                    (_rand_pat(), 1),
+                    (_rand_pat(), 2),
+                ]
             else:
                 entries = [(_rand_pat(), i) for i in range(4)]
             random.shuffle(entries)
             pats, obj_types = zip(*entries)
             obj_types = list(obj_types)
             for (y, x), (tl, tr, bl, br) in zip(positions, pats):
-                image[y:y+2, x:x+2]     = tl
-                image[y:y+2, x+2:x+4]   = tr
-                image[y+2:y+4, x:x+2]   = bl
-                image[y+2:y+4, x+2:x+4] = br
+                image[y : y + 2, x : x + 2] = tl
+                image[y : y + 2, x + 2 : x + 4] = tr
+                image[y + 2 : y + 4, x : x + 2] = bl
+                image[y + 2 : y + 4, x + 2 : x + 4] = br
         else:
             if random_colors:
                 base = np.random.uniform(0, 1, size=(4, 3)).astype(np.float32)
@@ -171,10 +183,10 @@ class MondriaanGenerator:
 
             for (y, x), t in zip(positions, obj_types):
                 tl, tr, bl, br = vocab[t]
-                image[y:y+2, x:x+2]     = tl
-                image[y:y+2, x+2:x+4]   = tr
-                image[y+2:y+4, x:x+2]   = bl
-                image[y+2:y+4, x+2:x+4] = br
+                image[y : y + 2, x : x + 2] = tl
+                image[y : y + 2, x + 2 : x + 4] = tr
+                image[y + 2 : y + 4, x : x + 2] = bl
+                image[y + 2 : y + 4, x + 2 : x + 4] = br
 
         # strict label check — same rule as HalliGalli
         counts = Counter(obj_types)
@@ -185,6 +197,7 @@ class MondriaanGenerator:
 
 
 # ── visualisation ─────────────────────────────────────────────────────────────
+
 
 def _show_samples(
     n: int = 4,
@@ -217,12 +230,18 @@ def _show_samples(
             return
         counts = Counter(obj_types)
         repeated = {t for t, k in counts.items() if k >= 2}
-        pair_idx = {i for i, t in enumerate(obj_types) if t in repeated} if lbl == 1 else set()
+        pair_idx = (
+            {i for i, t in enumerate(obj_types) if t in repeated} if lbl == 1 else set()
+        )
         for i, (y, x) in enumerate(positions):
             color = "lime" if i in pair_idx else "yellow"
             rect = mpatches.Rectangle(
-                (x * zoom - 0.5, y * zoom - 0.5), 4 * zoom, 4 * zoom,
-                linewidth=1.5, edgecolor=color, facecolor="none",
+                (x * zoom - 0.5, y * zoom - 0.5),
+                4 * zoom,
+                4 * zoom,
+                linewidth=1.5,
+                edgecolor=color,
+                facecolor="none",
             )
             ax.add_patch(rect)
         return pair_idx
@@ -265,8 +284,13 @@ def _show_samples(
             for i, t in enumerate(obj_types)
         )
         axes[1, j].text(
-            0.05, 0.5, txt, fontsize=8, family="monospace",
-            verticalalignment="center", transform=axes[1, j].transAxes,
+            0.05,
+            0.5,
+            txt,
+            fontsize=8,
+            family="monospace",
+            verticalalignment="center",
+            transform=axes[1, j].transAxes,
         )
         axes[1, j].axis("off")
 
@@ -283,19 +307,34 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("Mondriaan benchmark generator")
     parser.add_argument("--image_size", type=int, default=64)
     parser.add_argument(
-        "--object_type", choices=["patterned", "solid"], default="patterned",
+        "--object_type",
+        choices=["patterned", "solid"],
+        default="patterned",
     )
     parser.add_argument("--min_sep", type=int, default=8)
-    parser.add_argument("--random_colors", action="store_true",
-                        help="Sample 4 random colours per image instead of fixed {R,C,G,M}.")
+    parser.add_argument(
+        "--random_colors",
+        action="store_true",
+        help="Sample 4 random colours per image instead of fixed {R,C,G,M}.",
+    )
     parser.add_argument("--visualize", action="store_true")
     parser.add_argument("--n_samples", type=int, default=4)
-    parser.add_argument("--image_only", action="store_true",
-                        help="Save one PDF per sample, no axes or text panel.")
-    parser.add_argument("--no_highlight", action="store_true",
-                        help="Disable highlight boxes on key objects.")
-    parser.add_argument("--zoom", type=int, default=16,
-                        help="Pixel zoom factor for visualisation (default 16).")
+    parser.add_argument(
+        "--image_only",
+        action="store_true",
+        help="Save one PDF per sample, no axes or text panel.",
+    )
+    parser.add_argument(
+        "--no_highlight",
+        action="store_true",
+        help="Disable highlight boxes on key objects.",
+    )
+    parser.add_argument(
+        "--zoom",
+        type=int,
+        default=16,
+        help="Pixel zoom factor for visualisation (default 16).",
+    )
     args = parser.parse_args()
 
     if args.visualize:

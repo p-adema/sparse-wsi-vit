@@ -26,7 +26,7 @@ def _compare_and_swap(
     n_dims: tl.constexpr,
 ):
     n_outer: tl.constexpr = x.numel >> n_dims
-    shape: tl.constexpr = [n_outer * 2**i, 2, 2**(n_dims - i - 1)]
+    shape: tl.constexpr = [n_outer * 2**i, 2, 2 ** (n_dims - i - 1)]
     y = tl.reshape(x, shape)
     # slice left/right with 'stride' 2**(n_dims - i - 1)
     mask = tl.arange(0, 2)[None, :, None]
@@ -68,8 +68,10 @@ def _bitonic_merge(
     # if flip = 00110011... then all the elements will be re-arranged alternatingly (with
     # a stride of 2) at this stage
     if order == 2:
-        shape: tl.constexpr = [n_outer * 2**(n_dims - 1 - stage), 2, 2**stage]
-        flip = tl.reshape(tl.broadcast_to(tl.arange(0, 2)[None, :, None], shape), x.shape)
+        shape: tl.constexpr = [n_outer * 2 ** (n_dims - 1 - stage), 2, 2**stage]
+        flip = tl.reshape(
+            tl.broadcast_to(tl.arange(0, 2)[None, :, None], shape), x.shape
+        )
     else:
         flip = order
     # perform `stage` rounds of `compare-and-swap`
@@ -87,7 +89,9 @@ def argsort(
 ):
     # handle default dimension or check that it is the most minor dim
     _dim: tl.constexpr = len(x.shape) - 1 if dim is None else dim
-    tl.static_assert(_dim == len(x.shape) - 1, "only minor dimension is currently supported")
+    tl.static_assert(
+        _dim == len(x.shape) - 1, "only minor dimension is currently supported"
+    )
     # iteratively run bitonic merge-sort steps
     n_dims: tl.constexpr = log2(x.shape[_dim])
 

@@ -2,7 +2,6 @@
 Approach B: DeepSeek Sparse Attention (DSA) for WSI slide encoding.
 """
 
-
 import torch
 import torch.nn as nn
 from torch import Tensor
@@ -10,13 +9,14 @@ from torch.utils.checkpoint import checkpoint
 
 from sparse_wsi_vit.models.deepseek_sparse_attention_kernels.kernels import (
     LightningIndexerFunction,
-    DSAAttentionFunction
+    DSAAttentionFunction,
 )
 
 from sparse_wsi_vit.models.vit_5.rope import VisionRotaryEmbedding
 
 
 # Top-level module
+
 
 class DeepSeekSparseAttention(nn.Module):
     """Sparse attention with Multi-Query Attention (MQA) for K and V.
@@ -26,6 +26,7 @@ class DeepSeekSparseAttention(nn.Module):
     This is the MQA mode used by DeepSeek-V3.2, which halves K/V memory
     bandwidth in the attention kernel and reduces K/V parameter count.
     """
+
     def __init__(
         self,
         d_model,
@@ -41,16 +42,16 @@ class DeepSeekSparseAttention(nn.Module):
     ):
         super().__init__()
 
-        self.d_model           = d_model
-        self.attention_heads   = attention_heads
-        self.head_dim          = self.d_model // self.attention_heads
-        self.indexer_heads     = indexer_heads
-        self.indexer_dim       = indexer_dim
-        self.top_k             = top_k
-        self.BLOCK_Q           = BLOCK_Q
-        self.BLOCK_K           = BLOCK_K
-        self.BLOCK_D           = BLOCK_D
-        self.BLOCK_INDEXER_H   = indexer_heads
+        self.d_model = d_model
+        self.attention_heads = attention_heads
+        self.head_dim = self.d_model // self.attention_heads
+        self.indexer_heads = indexer_heads
+        self.indexer_dim = indexer_dim
+        self.top_k = top_k
+        self.BLOCK_Q = BLOCK_Q
+        self.BLOCK_K = BLOCK_K
+        self.BLOCK_D = BLOCK_D
+        self.BLOCK_INDEXER_H = indexer_heads
         self.BLOCK_ATTENTION_H = attention_heads
 
         self.indexer_head_weights = nn.Parameter(torch.randn(indexer_heads))
@@ -61,8 +62,8 @@ class DeepSeekSparseAttention(nn.Module):
         #   kv_proj: ONE shared K and V     → (B, T, 2 * head_dim)
         # Total params: H*D + 2*head_dim  vs  3*H*D for MHA.
         # At H=4, head_dim=64, D=256: 1280 vs 3072 — 2.4× fewer KV params.
-        self.q_proj  = nn.Linear(d_model, d_model)               # H * head_dim
-        self.kv_proj = nn.Linear(d_model, 2 * self.head_dim)     # shared K + V
+        self.q_proj = nn.Linear(d_model, d_model)  # H * head_dim
+        self.kv_proj = nn.Linear(d_model, 2 * self.head_dim)  # shared K + V
         self.out_proj = nn.Linear(d_model, d_model)
 
         self.rope = VisionRotaryEmbedding(
@@ -81,11 +82,13 @@ class DeepSeekSparseAttention(nn.Module):
         q = q.permute(0, 2, 1, 3).contiguous()
 
         # K, V: (B, T, head_dim) — shared across all H heads (MQA)
-        kv = self.kv_proj(x)                                   # (B, T, 2*head_dim)
-        k, v = kv.split(self.head_dim, dim=-1)                 # each (B, T, head_dim)
+        kv = self.kv_proj(x)  # (B, T, 2*head_dim)
+        k, v = kv.split(self.head_dim, dim=-1)  # each (B, T, head_dim)
         k, v = k.contiguous(), v.contiguous()
 
-        k = k.unsqueeze(1).expand(-1, self.attention_heads, -1, -1)  # (B, H, T, head_dim)
+        k = k.unsqueeze(1).expand(
+            -1, self.attention_heads, -1, -1
+        )  # (B, H, T, head_dim)
 
         if coords is not None:
             num_cls = T - coords.shape[1]
@@ -98,7 +101,9 @@ class DeepSeekSparseAttention(nn.Module):
             if num_cls > 0:
                 q_patch = q[:, :, num_cls:].permute(0, 2, 1, 3)  # (B, L, H, head_dim)
                 k_patch = k[:, :, num_cls:].permute(0, 2, 1, 3)
-                q_patch = self.rope(q_patch, coords).permute(0, 2, 1, 3)  # back to (B, H, L, head_dim)
+                q_patch = self.rope(q_patch, coords).permute(
+                    0, 2, 1, 3
+                )  # back to (B, H, L, head_dim)
                 k_patch = self.rope(k_patch, coords).permute(0, 2, 1, 3)
                 q = torch.cat([q[:, :, :num_cls], q_patch], dim=2)
                 k = torch.cat([k[:, :, :num_cls], k_patch], dim=2)
@@ -106,14 +111,23 @@ class DeepSeekSparseAttention(nn.Module):
                 q = self.rope(q.permute(0, 2, 1, 3), coords).permute(0, 2, 1, 3)
                 k = self.rope(k.permute(0, 2, 1, 3), coords).permute(0, 2, 1, 3)
 
-        k = k[:, 0]   # (B, T, head_dim)
+        k = k[:, 0]  # (B, T, head_dim)
 
         q_proj, k_proj = self.indexer_proj(x)  # (B, T, IH, ID)
 
         idx, valid, scores = LightningIndexerFunction.apply(
-            q_proj, k_proj, self.indexer_head_weights,
-            B, T, self.indexer_heads, self.indexer_dim, self.top_k,
-            self.BLOCK_Q, self.BLOCK_K, self.BLOCK_D, self.BLOCK_INDEXER_H,
+            q_proj,
+            k_proj,
+            self.indexer_head_weights,
+            B,
+            T,
+            self.indexer_heads,
+            self.indexer_dim,
+            self.top_k,
+            self.BLOCK_Q,
+            self.BLOCK_K,
+            self.BLOCK_D,
+            self.BLOCK_INDEXER_H,
         )
 
         # Routing weights: raw indexer scores gate each selected token's contribution.
@@ -126,11 +140,22 @@ class DeepSeekSparseAttention(nn.Module):
         )
 
         out = DSAAttentionFunction.apply(
-            q, k, v,
-            idx.detach(), valid.detach(), routing_weights,
+            q,
+            k,
+            v,
+            idx.detach(),
+            valid.detach(),
+            routing_weights,
             o_ptr,
-            B, self.attention_heads, T, self.head_dim, self.top_k,
-            self.BLOCK_Q, self.BLOCK_K, self.BLOCK_ATTENTION_H, self.BLOCK_D,
+            B,
+            self.attention_heads,
+            T,
+            self.head_dim,
+            self.top_k,
+            self.BLOCK_Q,
+            self.BLOCK_K,
+            self.BLOCK_ATTENTION_H,
+            self.BLOCK_D,
         )
 
         out = out.permute(0, 2, 1, 3).reshape(B, T, -1)
@@ -139,13 +164,14 @@ class DeepSeekSparseAttention(nn.Module):
 
 # Indexer projection
 
+
 class IndexerProjection(nn.Module):
     def __init__(self, d_model, indexer_heads, indexer_dim):
         super().__init__()
         self.q_proj = nn.Linear(d_model, indexer_heads * indexer_dim)
         self.k_proj = nn.Linear(d_model, indexer_heads * indexer_dim)
         self.indexer_heads = indexer_heads
-        self.indexer_dim   = indexer_dim
+        self.indexer_dim = indexer_dim
 
     def forward(self, x):
         B, T, _ = x.shape
@@ -182,20 +208,20 @@ class DSAViTBlock(nn.Module):
         block_k: int = 32,
         block_d: int = 32,
         expansion_factor: float = 4.0,
-        attn_dropout: float = 0.0,   # kept for API parity, not used in DSA
+        attn_dropout: float = 0.0,  # kept for API parity, not used in DSA
         proj_dropout: float = 0.0,
     ) -> None:
         super().__init__()
         self.norm1 = nn.LayerNorm(embed_dim)
-        self.attn  = DeepSeekSparseAttention(
-            d_model        = embed_dim,
-            attention_heads= num_heads,
-            indexer_heads  = indexer_heads,
-            indexer_dim    = indexer_dim,
-            top_k          = top_k,
-            BLOCK_Q        = block_q,
-            BLOCK_K        = block_k,
-            BLOCK_D        = block_d,
+        self.attn = DeepSeekSparseAttention(
+            d_model=embed_dim,
+            attention_heads=num_heads,
+            indexer_heads=indexer_heads,
+            indexer_dim=indexer_dim,
+            top_k=top_k,
+            BLOCK_Q=block_q,
+            BLOCK_K=block_k,
+            BLOCK_D=block_d,
         )
         self.drop1 = nn.Dropout(proj_dropout)
 
@@ -270,8 +296,8 @@ class DSAViTSlideEncoder(nn.Module):
                 f"Recommended: embed_dim // num_heads == 64 or 128."
             )
 
-        self.num_cls    = num_cls
-        self.embed_dim  = embed_dim
+        self.num_cls = num_cls
+        self.embed_dim = embed_dim
         self.out_features = out_features
 
         # Project patch embeddings into the transformer's working dimension
@@ -281,22 +307,24 @@ class DSAViTSlideEncoder(nn.Module):
         self.cls_tokens = nn.Parameter(torch.zeros(1, num_cls, embed_dim))
         nn.init.trunc_normal_(self.cls_tokens, std=0.02)
 
-        self.blocks = nn.ModuleList([
-            DSAViTBlock(
-                embed_dim      = embed_dim,
-                num_heads      = num_heads,
-                indexer_heads  = indexer_heads,
-                indexer_dim    = indexer_dim,
-                top_k          = top_k,
-                block_q        = block_q,
-                block_k        = block_k,
-                block_d        = block_d,
-                expansion_factor = expansion_factor,
-                attn_dropout   = attn_dropout,
-                proj_dropout   = proj_dropout,
-            )
-            for _ in range(num_layers)
-        ])
+        self.blocks = nn.ModuleList(
+            [
+                DSAViTBlock(
+                    embed_dim=embed_dim,
+                    num_heads=num_heads,
+                    indexer_heads=indexer_heads,
+                    indexer_dim=indexer_dim,
+                    top_k=top_k,
+                    block_q=block_q,
+                    block_k=block_k,
+                    block_d=block_d,
+                    expansion_factor=expansion_factor,
+                    attn_dropout=attn_dropout,
+                    proj_dropout=proj_dropout,
+                )
+                for _ in range(num_layers)
+            ]
+        )
 
         self.norm = nn.LayerNorm(embed_dim)
 
@@ -334,7 +362,7 @@ class DSAViTSlideEncoder(nn.Module):
 
         # Prepend CLS tokens
         cls = self.cls_tokens.expand(B, -1, -1)  # (B, num_cls, embed_dim)
-        x   = torch.cat([cls, x], dim=1)          # (B, num_cls + patch_len, embed_dim)
+        x = torch.cat([cls, x], dim=1)  # (B, num_cls + patch_len, embed_dim)
 
         for block in self.blocks:
             if self.gradient_checkpointing and self.training:
@@ -345,9 +373,9 @@ class DSAViTSlideEncoder(nn.Module):
         x = self.norm(x)
 
         # Weighted pool over CLS tokens
-        cls_tokens = x[:, :self.num_cls]                           # (B, num_cls, embed_dim)
-        weights    = torch.softmax(self.cls_pool(cls_tokens), dim=1)  # (B, num_cls, 1)
-        cls_out    = (weights * cls_tokens).sum(dim=1)             # (B, embed_dim)
+        cls_tokens = x[:, : self.num_cls]  # (B, num_cls, embed_dim)
+        weights = torch.softmax(self.cls_pool(cls_tokens), dim=1)  # (B, num_cls, 1)
+        cls_out = (weights * cls_tokens).sum(dim=1)  # (B, embed_dim)
 
         logits = self.head(cls_out)  # (B, out_features)
 
@@ -393,4 +421,3 @@ class DeepseekSparseAttentionAdapter(nn.Module):
 
     def forward(self, x: Tensor, coords: Tensor | None = None) -> Tensor:
         return self.attn(x, coords)
-

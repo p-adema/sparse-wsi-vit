@@ -13,15 +13,16 @@ from .op import exp, log
 from sparse_wsi_vit.models.nsa_kernels.fla_utils import autotune_cache_kwargs
 
 
-@triton.heuristics({
-    'HAS_SCALE': lambda args: args['scale'] is not None,
-})
+@triton.heuristics(
+    {
+        "HAS_SCALE": lambda args: args["scale"] is not None,
+    }
+)
 @triton.autotune(
     configs=[
-        triton.Config({}, num_warps=num_warps)
-        for num_warps in [1, 2, 4, 8, 16, 32]
+        triton.Config({}, num_warps=num_warps) for num_warps in [1, 2, 4, 8, 16, 32]
     ],
-    key=['D'],
+    key=["D"],
     **autotune_cache_kwargs,
 )
 @triton.jit
@@ -37,7 +38,7 @@ def logsumexp_fwd_kernel(
     o_d = i_d * B + tl.arange(0, B)
     m_d = o_d < D
 
-    b_x = tl.load(x + i_n * D + o_d, mask=m_d, other=-float('inf'))
+    b_x = tl.load(x + i_n * D + o_d, mask=m_d, other=-float("inf"))
     if HAS_SCALE:
         b_x = b_x * scale
     b_m = tl.max(b_x, 0)

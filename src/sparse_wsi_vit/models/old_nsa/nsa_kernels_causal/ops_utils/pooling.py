@@ -10,22 +10,29 @@ import triton
 import triton.language as tl
 
 from .index import prepare_chunk_indices
-from sparse_wsi_vit.models.nsa_kernels.fla_utils import autocast_custom_bwd, autocast_custom_fwd, autotune_cache_kwargs, input_guard
+from sparse_wsi_vit.models.nsa_kernels.fla_utils import (
+    autocast_custom_bwd,
+    autocast_custom_fwd,
+    autotune_cache_kwargs,
+    input_guard,
+)
 
 
-@triton.heuristics({
-    'IS_VARLEN': lambda args: args['cu_seqlens'] is not None,
-})
+@triton.heuristics(
+    {
+        "IS_VARLEN": lambda args: args["cu_seqlens"] is not None,
+    }
+)
 @triton.autotune(
     configs=[
-        triton.Config({'BD': BD}, num_warps=num_warps)
+        triton.Config({"BD": BD}, num_warps=num_warps)
         for BD in [16, 32, 64, 128]
         for num_warps in [1, 2, 4, 8]
     ],
-    key=['BT'],
+    key=["BT"],
     **autotune_cache_kwargs,
 )
-@triton.jit(do_not_specialize=['T'])
+@triton.jit(do_not_specialize=["T"])
 def mean_pooling_fwd_kernel(
     x,
     o,
@@ -42,8 +49,14 @@ def mean_pooling_fwd_kernel(
     i_b, i_h = i_bh // H, i_bh % H
     if IS_VARLEN:
         i_tg = i_t
-        i_n, i_t = tl.load(chunk_indices + i_t * 2).to(tl.int32), tl.load(chunk_indices + i_t * 2 + 1).to(tl.int32)
-        bos, eos = tl.load(cu_seqlens + i_n).to(tl.int32), tl.load(cu_seqlens + i_n + 1).to(tl.int32)
+        i_n, i_t = (
+            tl.load(chunk_indices + i_t * 2).to(tl.int32),
+            tl.load(chunk_indices + i_t * 2 + 1).to(tl.int32),
+        )
+        bos, eos = (
+            tl.load(cu_seqlens + i_n).to(tl.int32),
+            tl.load(cu_seqlens + i_n + 1).to(tl.int32),
+        )
         T = eos - bos
         NT = tl.cdiv(T, BT)
     else:
@@ -51,8 +64,17 @@ def mean_pooling_fwd_kernel(
         i_tg = i_b * NT + i_t
         bos, eos = i_b * T, i_b * T + T
 
-    p_x = tl.make_block_ptr(x + (bos * H + i_h) * D, (T, D), (H*D, 1), (i_t * BT, i_d * BD), (BT, BD), (1, 0))
-    p_o = tl.make_block_ptr(o + (i_tg * H + i_h) * D, (D,), (1,), (i_d * BD,), (BD,), (0,))
+    p_x = tl.make_block_ptr(
+        x + (bos * H + i_h) * D,
+        (T, D),
+        (H * D, 1),
+        (i_t * BT, i_d * BD),
+        (BT, BD),
+        (1, 0),
+    )
+    p_o = tl.make_block_ptr(
+        o + (i_tg * H + i_h) * D, (D,), (1,), (i_d * BD,), (BD,), (0,)
+    )
     # [BT, BD]
     b_x = tl.load(p_x, boundary_check=(0, 1)).to(tl.float32)
     # [BD]
@@ -60,19 +82,21 @@ def mean_pooling_fwd_kernel(
     tl.store(p_o, b_o.to(p_o.dtype.element_ty), boundary_check=(0,))
 
 
-@triton.heuristics({
-    'IS_VARLEN': lambda args: args['cu_seqlens'] is not None,
-})
+@triton.heuristics(
+    {
+        "IS_VARLEN": lambda args: args["cu_seqlens"] is not None,
+    }
+)
 @triton.autotune(
     configs=[
-        triton.Config({'BD': BD}, num_warps=num_warps)
+        triton.Config({"BD": BD}, num_warps=num_warps)
         for BD in [16, 32, 64, 128]
         for num_warps in [1, 2, 4, 8]
     ],
-    key=['BT'],
+    key=["BT"],
     **autotune_cache_kwargs,
 )
-@triton.jit(do_not_specialize=['T'])
+@triton.jit(do_not_specialize=["T"])
 def mean_pooling_bwd_kernel(
     do,
     dx,
@@ -89,8 +113,14 @@ def mean_pooling_bwd_kernel(
     i_b, i_h = i_bh // H, i_bh % H
     if IS_VARLEN:
         i_tg = i_t
-        i_n, i_t = tl.load(chunk_indices + i_t * 2).to(tl.int32), tl.load(chunk_indices + i_t * 2 + 1).to(tl.int32)
-        bos, eos = tl.load(cu_seqlens + i_n).to(tl.int32), tl.load(cu_seqlens + i_n + 1).to(tl.int32)
+        i_n, i_t = (
+            tl.load(chunk_indices + i_t * 2).to(tl.int32),
+            tl.load(chunk_indices + i_t * 2 + 1).to(tl.int32),
+        )
+        bos, eos = (
+            tl.load(cu_seqlens + i_n).to(tl.int32),
+            tl.load(cu_seqlens + i_n + 1).to(tl.int32),
+        )
         T = eos - bos
         NT = tl.cdiv(T, BT)
     else:
@@ -98,8 +128,17 @@ def mean_pooling_bwd_kernel(
         i_tg = i_b * NT + i_t
         bos, eos = i_b * T, i_b * T + T
 
-    p_dx = tl.make_block_ptr(dx + (bos * H + i_h) * D, (T, D), (H*D, 1), (i_t * BT, i_d * BD), (BT, BD), (1, 0))
-    p_do = tl.make_block_ptr(do + (i_tg * H + i_h) * D, (D,), (1,), (i_d * BD,), (BD,), (0,))
+    p_dx = tl.make_block_ptr(
+        dx + (bos * H + i_h) * D,
+        (T, D),
+        (H * D, 1),
+        (i_t * BT, i_d * BD),
+        (BT, BD),
+        (1, 0),
+    )
+    p_do = tl.make_block_ptr(
+        do + (i_tg * H + i_h) * D, (D,), (1,), (i_d * BD,), (BD,), (0,)
+    )
     # [BD]
     b_do = tl.load(p_do, boundary_check=(0,)).to(tl.float32)
     # [BT, BD]
@@ -120,7 +159,10 @@ def mean_pooling_fwd(
     NT = triton.cdiv(T, BT) if cu_seqlens is None else len(chunk_indices)
 
     o = x.new_empty(B, NT, H, D)
-    def grid(meta): return (triton.cdiv(D, meta['BD']), NT, B * H)
+
+    def grid(meta):
+        return (triton.cdiv(D, meta["BD"]), NT, B * H)
+
     mean_pooling_fwd_kernel[grid](
         x,
         o,
@@ -149,7 +191,10 @@ def mean_pooling_bwd(
     NT = triton.cdiv(T, BT) if cu_seqlens is None else len(chunk_indices)
 
     dx = do.new_empty(B, T, H, D)
-    def grid(meta): return (triton.cdiv(D, meta['BD']), NT, B * H)
+
+    def grid(meta):
+        return (triton.cdiv(D, meta["BD"]), NT, B * H)
+
     mean_pooling_bwd_kernel[grid](
         do,
         dx,
@@ -164,7 +209,6 @@ def mean_pooling_bwd(
 
 
 class MeanPoolingFunction(torch.autograd.Function):
-
     @staticmethod
     @input_guard
     @autocast_custom_fwd
@@ -185,7 +229,8 @@ class MeanPoolingFunction(torch.autograd.Function):
     @input_guard
     @autocast_custom_bwd
     def backward(
-        ctx, do,
+        ctx,
+        do,
     ) -> tuple[torch.Tensor, None, None]:
         batch_size = ctx.batch_size
         seq_len = ctx.seq_len

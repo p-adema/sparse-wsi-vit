@@ -38,7 +38,7 @@ with torch.inference_mode(), torch.autocast("cuda", torch.bfloat16):
 
 
 def find_roi(
-        slide: OpenSlide, mask_path: Path
+    slide: OpenSlide, mask_path: Path
 ) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray, npt.NDArray]:
     """
     We want to find regions of interest which are sized 112x112 when downsampled 16x, such
@@ -63,12 +63,12 @@ def find_roi(
     mask_windows = np.lib.stride_tricks.sliding_window_view(mask, (112, 112))[
         ::112, ::112
     ]
-    roi_y, roi_x = np.nonzero(mask_windows.sum(axis=(2, 3)) > 112 ** 2 * 0.1)
+    roi_y, roi_x = np.nonzero(mask_windows.sum(axis=(2, 3)) > 112**2 * 0.1)
     n_regs = len(roi_y)
     subwindows56 = mask_windows[roi_y, roi_x].reshape(n_regs, 2, 56, 2, 56)
-    int112 = subwindows56.sum((2, 4)) > 56 ** 2 * 0.1
+    int112 = subwindows56.sum((2, 4)) > 56**2 * 0.1
     subwindows28 = mask_windows[roi_y, roi_x].reshape(n_regs, 4, 28, 4, 28)
-    int56 = subwindows28.sum((2, 4)) > 28 ** 2 * 0.1
+    int56 = subwindows28.sum((2, 4)) > 28**2 * 0.1
     return roi_x, roi_y, int112, int56
 
 

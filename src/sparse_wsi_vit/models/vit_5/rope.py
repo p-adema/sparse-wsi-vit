@@ -13,7 +13,9 @@ def broadcat(freqss, dim=-1):
     num_freqss = len(freqss)
     shape_lens = set(list(map(lambda t: len(t.shape), freqss)))
     if not torch.compiler.is_compiling():
-        assert len(shape_lens) == 1, "freqss must all have the same number of dimensions"
+        assert len(shape_lens) == 1, (
+            "freqss must all have the same number of dimensions"
+        )
     shape_len = list(shape_lens)[0]
     dim = (dim + shape_len) if dim < 0 else dim
     dims = list(zip(*map(lambda t: list(t.shape), freqss)))
@@ -39,23 +41,23 @@ def rotate_half(x):
 
 class VisionRotaryEmbedding(nn.Module):
     def __init__(
-            self,
-            dim,
-            pt_seq_len=14,
-            custom_freqs=None,
-            freqs_for="lang",
-            theta=10000,
-            max_freq=10,
-            num_freqs=1,
-            coord_high=None,
-            dynamic=False,
+        self,
+        dim,
+        pt_seq_len=14,
+        custom_freqs=None,
+        freqs_for="lang",
+        theta=10000,
+        max_freq=10,
+        num_freqs=1,
+        coord_high=None,
+        dynamic=False,
     ):
         super().__init__()
         if custom_freqs:
             freqs = custom_freqs
         elif freqs_for == "lang":
             freqs = 1.0 / (
-                    theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim)
+                theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim)
             )
         elif freqs_for == "pixel":
             freqs = torch.linspace(1.0, max_freq / 2, dim // 2) * pi
@@ -91,12 +93,14 @@ class VisionRotaryEmbedding(nn.Module):
             t_y = coords[..., 1] / self.coord_high  # (B, N)
 
             freqs_x = torch.einsum("..., f -> ... f", t_x, self.freqs)  # (B, N, dim//2)
-            freqs_x = repeat(freqs_x, "... n -> ... (n r)", r=2)         # (B, N, dim)
+            freqs_x = repeat(freqs_x, "... n -> ... (n r)", r=2)  # (B, N, dim)
             freqs_y = torch.einsum("..., f -> ... f", t_y, self.freqs)  # (B, N, dim//2)
-            freqs_y = repeat(freqs_y, "... n -> ... (n r)", r=2)         # (B, N, dim)
-            freqs = torch.cat([freqs_x, freqs_y], dim=-1)                # (B, N, head_dim)
+            freqs_y = repeat(freqs_y, "... n -> ... (n r)", r=2)  # (B, N, dim)
+            freqs = torch.cat([freqs_x, freqs_y], dim=-1)  # (B, N, head_dim)
 
-            freqs_cos = freqs.cos().unsqueeze(2)  # (B, N, 1, head_dim) — broadcasts over heads
+            freqs_cos = freqs.cos().unsqueeze(
+                2
+            )  # (B, N, 1, head_dim) — broadcasts over heads
             freqs_sin = freqs.sin().unsqueeze(2)
             return x * freqs_cos + rotate_half(x) * freqs_sin
 

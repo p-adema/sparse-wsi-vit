@@ -2,6 +2,7 @@ import torch
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def parallel_attn_bwd_kernel_preprocess(
     o,
@@ -19,6 +20,7 @@ def parallel_attn_bwd_kernel_preprocess(
     b_delta = tl.sum(b_o * b_do)
 
     tl.store(delta + i_n, b_delta.to(delta.dtype.element_ty))
+
 
 def parallel_attn_bwd_preprocess(
     o: torch.Tensor,

@@ -27,7 +27,7 @@ CSV_TRAIN_FOLD = "/home/scur0097/splits/camelyon/full"
 TARGET_NAME = "is_tumor"
 TARGET_OPTIONS = ("normal", "tumor")
 FEATURES_DIR = "/scratch-shared/scur0097/camelyon-emb"
-FEATURES_NAME = "cls"   # "cls" or "patches"
+FEATURES_NAME = "cls"  # "cls" or "patches"
 FEATURES_SCALE = 224
 FLATTEN_BLOCK = True
 
@@ -112,7 +112,7 @@ def get_config() -> ExperimentConfig:
     config.wandb = WandbConfig(
         project="wsi-classification",
         job_group=f"baseline_transmil_camelyon_{FEATURES_NAME}_{FEATURES_SCALE}",
-        entity="dl2-2026"
+        entity="dl2-2026",
     )
 
     return config

@@ -44,7 +44,7 @@ def naive_nsa(
         o (torch.Tensor):
             Outputs of shape `[B, T, HQ, V]`.
     """
-    if 'head_first' in kwargs:
+    if "head_first" in kwargs:
         raise DeprecationWarning(
             "head_first has been removed. Inputs must be in `[B, T, H, ...]` format.",
         )
@@ -54,7 +54,9 @@ def naive_nsa(
     dtype = q.dtype
     G = q.shape[2] // k.shape[2]
     BS = block_size
-    k, v, block_indices = (repeat(x, 'b t h d -> b t (h g) d', g=G) for x in (k, v, block_indices))
+    k, v, block_indices = (
+        repeat(x, "b t h d -> b t (h g) d", g=G) for x in (k, v, block_indices)
+    )
     q, k, v = map(lambda x: x.float(), (q, k, v))
 
     o = torch.zeros_like(v)
@@ -62,16 +64,22 @@ def naive_nsa(
     if cu_seqlens is None:
         varlen = False
         B, T = q.shape[:2]
-        cu_seqlens = torch.cat([
-            block_indices.new_tensor(range(0, B*T, T)), block_indices.new_tensor([B*T]),
-        ])
+        cu_seqlens = torch.cat(
+            [
+                block_indices.new_tensor(range(0, B * T, T)),
+                block_indices.new_tensor([B * T]),
+            ]
+        )
 
     for i in range(len(cu_seqlens) - 1):
         if not varlen:
             q_b, k_b, v_b, i_b = q[i], k[i], v[i], block_indices[i]
         else:
-            T = cu_seqlens[i+1] - cu_seqlens[i]
-            q_b, k_b, v_b, i_b = map(lambda x: x[0][cu_seqlens[i]:cu_seqlens[i+1]], (q, k, v, block_indices))
+            T = cu_seqlens[i + 1] - cu_seqlens[i]
+            q_b, k_b, v_b, i_b = map(
+                lambda x: x[0][cu_seqlens[i] : cu_seqlens[i + 1]],
+                (q, k, v, block_indices),
+            )
 
         i_b = i_b.unsqueeze(-1) * BS + i_b.new_tensor(range(BS))
         # [T, S*BS, HQ]
@@ -82,12 +90,21 @@ def naive_nsa(
             # [S*BS, HQ]
             i_i = i_b[i_q]
             # [S*BS, HQ, -1]
-            k_i, v_i = map(lambda x: x.gather(0, i_i.clamp(0, T-1).unsqueeze(-1).expand(*i_i.shape, x.shape[-1])), (k_b, v_b))
+            k_i, v_i = map(
+                lambda x: x.gather(
+                    0, i_i.clamp(0, T - 1).unsqueeze(-1).expand(*i_i.shape, x.shape[-1])
+                ),
+                (k_b, v_b),
+            )
             # [S*BS, HQ]
-            attn = torch.einsum('h d, n h d -> n h', q_i, k_i).masked_fill(i_i > i_q, float('-inf')).softmax(0)
+            attn = (
+                torch.einsum("h d, n h d -> n h", q_i, k_i)
+                .masked_fill(i_i > i_q, float("-inf"))
+                .softmax(0)
+            )
             if not varlen:
-                o[i, i_q] = torch.einsum('n h, n h v -> h v', attn, v_i)
+                o[i, i_q] = torch.einsum("n h, n h v -> h v", attn, v_i)
             else:
-                o[0][cu_seqlens[i]+i_q] = torch.einsum('n h, n h v -> h v', attn, v_i)
+                o[0][cu_seqlens[i] + i_q] = torch.einsum("n h, n h v -> h v", attn, v_i)
 
     return o.to(dtype)

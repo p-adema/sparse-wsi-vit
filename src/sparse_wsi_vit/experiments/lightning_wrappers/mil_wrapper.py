@@ -35,7 +35,11 @@ class MILWrapper(LightningWrapperBase):
 
         if self.multiclass:
             acc_kwargs = {"task": "multiclass", "num_classes": network.out_features}
-            prf_kwargs = {"task": "multiclass", "num_classes": network.out_features, "average": "macro"}
+            prf_kwargs = {
+                "task": "multiclass",
+                "num_classes": network.out_features,
+                "average": "macro",
+            }
         else:
             acc_kwargs = {"task": "binary"}
             prf_kwargs = {"task": "binary"}
@@ -87,7 +91,9 @@ class MILWrapper(LightningWrapperBase):
             probs = torch.sigmoid(logits)
         else:
             probs = torch.softmax(logits, dim=-1)
-        preds = (probs >= 0.5).int() if not self.multiclass else torch.argmax(probs, dim=-1)
+        preds = (
+            (probs >= 0.5).int() if not self.multiclass else torch.argmax(probs, dim=-1)
+        )
         self.val_precision.update(preds, labels)
         self.val_recall.update(preds, labels)
         self.val_f1.update(preds, labels)
@@ -130,9 +136,7 @@ class MILWrapper(LightningWrapperBase):
     ) -> torch.Tensor:
         return self._val_or_test_step(batch)
 
-    def test_step(
-        self, batch: dict[str, torch.Tensor], batch_idx: int
-    ) -> torch.Tensor:
+    def test_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
         return self._val_or_test_step(batch, kind="test")
 
     def _val_or_test_step(
@@ -154,12 +158,36 @@ class MILWrapper(LightningWrapperBase):
 
         self._update_prf_metrics(logits, labels)
 
-        self.log(f"{kind}/loss", loss, on_step=False, on_epoch=True, sync_dist=True, batch_size=batch_size)
-        self.log(f"{kind}/num_patches", float(num_patches), on_epoch=True, batch_size=batch_size)
+        self.log(
+            f"{kind}/loss",
+            loss,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+            batch_size=batch_size,
+        )
+        self.log(
+            f"{kind}/num_patches",
+            float(num_patches),
+            on_epoch=True,
+            batch_size=batch_size,
+        )
         self.log(f"{kind}/step_ms", step_ms, on_epoch=True, batch_size=batch_size)
-        self.log(f"{kind}/logits_mean", logits.mean(), on_step=True, on_epoch=True, batch_size=batch_size)
+        self.log(
+            f"{kind}/logits_mean",
+            logits.mean(),
+            on_step=True,
+            on_epoch=True,
+            batch_size=batch_size,
+        )
         if logits.numel() > 1:
-            self.log(f"{kind}/logits_std", logits.std(), on_step=True, on_epoch=True, batch_size=batch_size)
+            self.log(
+                f"{kind}/logits_std",
+                logits.std(),
+                on_step=True,
+                on_epoch=True,
+                batch_size=batch_size,
+            )
         return loss
 
     def on_validation_epoch_end(self) -> None:

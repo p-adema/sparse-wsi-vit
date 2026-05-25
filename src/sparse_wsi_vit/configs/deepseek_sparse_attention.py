@@ -19,7 +19,9 @@ from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
 
 from sparse_wsi_vit.models.sparse_vit5_slide_encoder import SparseViT5SlideEncoder
 from sparse_wsi_vit.experiments.lightning_wrappers.mil_wrapper import MILWrapper
-from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import WSIAttnWrapper
+from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import (
+    WSIAttnWrapper,
+)
 from sparse_wsi_vit.experiments.datamodules.h5_datamodule import H5FeatureBagDataModule
 
 PIN_MEMORY = True
@@ -41,28 +43,28 @@ NUM_WORKERS = 4
 IN_FEATURES = 1280
 OUT_FEATURES = 1  # Binary task
 PRECISION = "bf16-mixed"
-EMBED_DIM=256
-NUM_HEADS=4            # embed_dim // num_heads=64
-DEPTH=3
-NUM_CLS=2
+EMBED_DIM = 256
+NUM_HEADS = 4  # embed_dim // num_heads=64
+DEPTH = 3
+NUM_CLS = 2
 
-MLP_RATIO=4.0
-ATTN_DROPOUT=0.0
-PROJ_DROPOUT=0.2
-DROP_PATH_RATE=0.1
-LAYER_SCALE=True
-INIT_SCALE=1e-4
+MLP_RATIO = 4.0
+ATTN_DROPOUT = 0.0
+PROJ_DROPOUT = 0.2
+DROP_PATH_RATE = 0.1
+LAYER_SCALE = True
+INIT_SCALE = 1e-4
 
-GRADIENT_CHECKPOINTING=False
+GRADIENT_CHECKPOINTING = False
 
-WARMUP_ITERATIONS_PERCENTAGE=0.05
-LEARNING_RATE=2e-4
-WEIGHT_DECAY=1e-2
-TRAINING_ITERATIONS=2500
-GRAD_CLIP=1.0
-ACCUMULATE_GRAD_STEPS=2
-CLASS_WEIGHTS=True
-WORKER_PREFETCH=2
+WARMUP_ITERATIONS_PERCENTAGE = 0.05
+LEARNING_RATE = 2e-4
+WEIGHT_DECAY = 1e-2
+TRAINING_ITERATIONS = 2500
+GRAD_CLIP = 1.0
+ACCUMULATE_GRAD_STEPS = 2
+CLASS_WEIGHTS = True
+WORKER_PREFETCH = 2
 
 # DSA specific config
 INDEXER_HEADS = 4
@@ -70,9 +72,9 @@ INDEXER_DIM = 32
 TOP_K = 128
 BLOCK_Q = 32
 BLOCK_K = 32
-BLOCK_D = 32   
+BLOCK_D = 32
 
-ROPE_THETA=10_000.0
+ROPE_THETA = 10_000.0
 ROPE_DYNAMIC_HIGH = 220_000
 
 PATIENCE = 10  # Early stopping
@@ -106,7 +108,7 @@ def get_config() -> ExperimentConfig:
     )
 
     # Network: SparseViT5SlideEncoder
-    config.net=LazyConfig(SparseViT5SlideEncoder)(
+    config.net = LazyConfig(SparseViT5SlideEncoder)(
         in_features=IN_FEATURES,
         out_features=OUT_FEATURES,
         embed_dim=EMBED_DIM,

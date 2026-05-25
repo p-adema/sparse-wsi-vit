@@ -14,14 +14,14 @@ from sparse_wsi_vit.models.nsa_kernels.fla_utils import autotune_cache_kwargs
 
 @triton.autotune(
     configs=[
-        triton.Config({'BT': BT}, num_warps=num_warps)
+        triton.Config({"BT": BT}, num_warps=num_warps)
         for BT in [16, 32, 64]
         for num_warps in [2, 4, 8]
     ],
-    key=['S'],
+    key=["S"],
     **autotune_cache_kwargs,
 )
-@triton.jit(do_not_specialize=['T'])
+@triton.jit(do_not_specialize=["T"])
 def logcumsumexp_fwd_kernel(
     s,
     z,
@@ -31,13 +31,17 @@ def logcumsumexp_fwd_kernel(
 ):
     i_bh = tl.program_id(0)
     o_i = tl.arange(0, BT)
-    m_s = tl.where(o_i[:, None] >= o_i[None, :], 1., 0.)
+    m_s = tl.where(o_i[:, None] >= o_i[None, :], 1.0, 0.0)
 
-    b_mp = tl.full([S], float('-inf'), dtype=tl.float32)
+    b_mp = tl.full([S], float("-inf"), dtype=tl.float32)
     b_zp = tl.zeros([S], dtype=tl.float32)
     for i_t in range(tl.cdiv(T, BT)):
-        p_s = tl.make_block_ptr(s + i_bh * T*S, (T, S), (S, 1), (i_t * BT, 0), (BT, S), (1, 0))
-        p_z = tl.make_block_ptr(z + i_bh * T*S, (T, S), (S, 1), (i_t * BT, 0), (BT, S), (1, 0))
+        p_s = tl.make_block_ptr(
+            s + i_bh * T * S, (T, S), (S, 1), (i_t * BT, 0), (BT, S), (1, 0)
+        )
+        p_z = tl.make_block_ptr(
+            z + i_bh * T * S, (T, S), (S, 1), (i_t * BT, 0), (BT, S), (1, 0)
+        )
 
         # [BT, S]
         b_s = tl.load(p_s, boundary_check=(0, 1)).to(tl.float32)

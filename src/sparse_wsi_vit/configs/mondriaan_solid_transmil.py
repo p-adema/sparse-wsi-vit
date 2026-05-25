@@ -20,30 +20,32 @@ from sparse_wsi_vit.experiments.default_cfg import (
 from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
 from sparse_wsi_vit.models.transmil import TransMIL
 from sparse_wsi_vit.experiments.lightning_wrappers.mil_wrapper import MILWrapper
-from sparse_wsi_vit.experiments.datamodules.mondriaan_h5_datamodule import MondriaanH5DataModule
+from sparse_wsi_vit.experiments.datamodules.mondriaan_h5_datamodule import (
+    MondriaanH5DataModule,
+)
 
 # ─── Data ────────────────────────────────────────────────────────────────────
-DATA_DIR     = os.environ["MONDRIAAN_DATA_DIR"]
-IN_FEATURES  = 3
+DATA_DIR = os.environ["MONDRIAAN_DATA_DIR"]
+IN_FEATURES = 3
 OUT_FEATURES = 2
 
 # ─── Optimisation ────────────────────────────────────────────────────────────
-BATCH_SIZE    = 64    # Nyström O(N×landmarks) not O(N²); GPU was at 2% before
-NUM_WORKERS   = 4
-PRECISION     = "bf16-mixed"
+BATCH_SIZE = 64  # Nyström O(N×landmarks) not O(N²); GPU was at 2% before
+NUM_WORKERS = 4
+PRECISION = "bf16-mixed"
 
-TRAINING_ITERATIONS          = 10_000
+TRAINING_ITERATIONS = 10_000
 WARMUP_ITERATIONS_PERCENTAGE = 0.05
-LEARNING_RATE                = 2e-4
-WEIGHT_DECAY                 = 1e-4
-GRAD_CLIP                    = 1.0
-ACCUMULATE_GRAD_STEPS        = 1
+LEARNING_RATE = 2e-4
+WEIGHT_DECAY = 1e-4
+GRAD_CLIP = 1.0
+ACCUMULATE_GRAD_STEPS = 1
 
 
 def get_config() -> ExperimentConfig:
     config = ExperimentConfig()
     config.debug = False
-    config.seed  = 42
+    config.seed = 42
 
     config.dataset = LazyConfig(MondriaanH5DataModule)(
         data_dir=DATA_DIR,

@@ -26,7 +26,7 @@ FEATURES_DIR = "/scratch-shared/scur0097/camelyon-emb"
 BATCH_SIZE = 1  # Standard for MIL bags
 NUM_WORKERS = 4
 IN_FEATURES = 1280
-OUT_FEATURES = 2 # Softmax and CE
+OUT_FEATURES = 2  # Softmax and CE
 PRECISION = "bf16-mixed"
 
 TRAINING_ITERATIONS = 10_000
@@ -34,6 +34,7 @@ WARMUP_ITERATIONS_PERCENTAGE = 0.05
 LEARNING_RATE = 2e-4
 WEIGHT_DECAY = 1e-4
 GRAD_CLIP = 1.0
+
 
 def get_config() -> ExperimentConfig:
     config = ExperimentConfig()
@@ -50,7 +51,7 @@ def get_config() -> ExperimentConfig:
         label_col_name="label",  # Changed from 'label' to an actual column present in the CSV
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
-        output_channels= OUT_FEATURES,
+        output_channels=OUT_FEATURES,
         features_name="cls_224x224",
         coords_name="coords_224x224",
         flatten_block=False,

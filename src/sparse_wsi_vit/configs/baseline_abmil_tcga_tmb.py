@@ -28,7 +28,7 @@ CSV_TRAIN_FOLD = "/home/scur0097/splits/tcga-tmb/full"
 TARGET_NAME = "tmb_binary"
 TARGET_OPTIONS = ("TMB-L", "TMB-H")
 FEATURES_DIR = "/scratch-shared/scur0097/tcga-v2"
-FEATURES_NAME = "cls"   # "cls" or "patches"
+FEATURES_NAME = "cls"  # "cls" or "patches"
 FEATURES_SCALE = 224
 FLATTEN_BLOCK = True
 
@@ -56,9 +56,7 @@ def get_config() -> ExperimentConfig:
     config.seed = 42
 
     # Dataset: Connects to your H5 extraction
-    config.dataset = LazyConfig(
-        H5FeatureBagDataModule
-    )(
+    config.dataset = LazyConfig(H5FeatureBagDataModule)(
         train_csv=f"{CSV_TRAIN_FOLD}/train.csv",
         val_csv=f"{CSV_TRAIN_FOLD}/val.csv",
         test_csv=f"{CSV_TRAIN_FOLD}/test.csv",
@@ -118,7 +116,7 @@ def get_config() -> ExperimentConfig:
     config.wandb = WandbConfig(
         project="wsi-classification",
         job_group=f"baseline_abmil_tcga_tmb_{FEATURES_NAME}_{FEATURES_SCALE}",
-        entity="dl2-2026"
+        entity="dl2-2026",
     )
 
     return config

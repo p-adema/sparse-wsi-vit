@@ -38,9 +38,9 @@ class NativeSparseAttention(nn.Module):
         rope_coord_high: float = 100_000.0,
     ):
         super().__init__()
-        assert (
-            num_q_heads % (num_kv_heads * 16) == 0
-        ), "NSA needs HQ to be a multiple of 16 * HKV"
+        assert num_q_heads % (num_kv_heads * 16) == 0, (
+            "NSA needs HQ to be a multiple of 16 * HKV"
+        )
 
         self.num_q_heads = num_q_heads
         self.num_kv_heads = num_kv_heads
@@ -60,7 +60,7 @@ class NativeSparseAttention(nn.Module):
         self.v_proj = nn.Linear(d_model, num_kv_heads * self.head_dim, bias=False)
 
         self.rope = VisionRotaryEmbedding(
-            dim=self.head_dim // 2, # need to review why
+            dim=self.head_dim // 2,  # need to review why
             freqs_for="pixel",  # hmm
             coord_high=rope_coord_high,
             dynamic=True,
@@ -156,7 +156,7 @@ class NSABlock(Block):
             num_kv_heads=num_kv_heads,
             block_size=block_size,
             block_counts=block_counts,
-            rope_coord_high=rope_coord_high
+            rope_coord_high=rope_coord_high,
         )
         super().__init__(
             dim=dim, num_heads=num_heads, Attention_block=nsa_wrapped_attn, **kwargs
@@ -284,6 +284,6 @@ class NSAViTSlideEncoder(nn.Module):
             else:
                 h = layer(h, coords=coords, cu_seqlens=cu_seqlens)
 
-        h = self.norm(h) # is this good? not 100% sure
+        h = self.norm(h)  # is this good? not 100% sure
         # ABMIL returns a dict containing {"logits": ..., "attention": ...}
         return self.pooler(h, return_attention=True)

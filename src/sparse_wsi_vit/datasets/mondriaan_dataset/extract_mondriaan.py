@@ -78,7 +78,7 @@ def _extract_split(
         img, label, _, _ = MondriaanGenerator.generate_single(
             image_size=image_size,
             object_type=object_type,
-            target_label=idx % 2,   # balanced labels within each split
+            target_label=idx % 2,  # balanced labels within each split
             min_sep=min_sep,
             random_colors=random_colors,
         )
@@ -86,22 +86,22 @@ def _extract_split(
         if pool_size == 1:
             # full resolution: each pixel is one token
             H, W, _ = img.shape
-            features = img.reshape(H * W, 3)                    # (N, 3)
+            features = img.reshape(H * W, 3)  # (N, 3)
             ys, xs = np.mgrid[0:H, 0:W]
-            coords = np.stack([xs.ravel(), ys.ravel()], axis=1) # (N, 2) x,y
+            coords = np.stack([xs.ravel(), ys.ravel()], axis=1)  # (N, 2) x,y
         else:
             # average-pool pool_size×pool_size blocks
             H, W, C = img.shape
             H2, W2 = H // pool_size, W // pool_size
-            blocked = img[:H2 * pool_size, :W2 * pool_size].reshape(
+            blocked = img[: H2 * pool_size, : W2 * pool_size].reshape(
                 H2, pool_size, W2, pool_size, C
             )
-            features = blocked.mean(axis=(1, 3)).reshape(H2 * W2, C) # (N, 3)
+            features = blocked.mean(axis=(1, 3)).reshape(H2 * W2, C)  # (N, 3)
             ys, xs = np.mgrid[0:H2, 0:W2]
             # coords reference original image space (top-left corner of each block)
             coords = np.stack(
                 [xs.ravel() * pool_size, ys.ravel() * pool_size], axis=1
-            )                                                    # (N, 2) x,y
+            )  # (N, 2) x,y
 
         # Replace black background tokens with sentinel so all N tokens are non-zero.
         background = (features == 0).all(axis=1)
@@ -109,26 +109,36 @@ def _extract_split(
 
         fname = output_dir / f"{split}_{idx:06d}_label{label}.h5"
         with h5py.File(fname, "w") as hf:
-            hf.create_dataset("features", data=features.astype(np.float32),
-                              compression="gzip")
-            hf.create_dataset("coords",   data=coords.astype(np.int32),
-                              compression="gzip")
+            hf.create_dataset(
+                "features", data=features.astype(np.float32), compression="gzip"
+            )
+            hf.create_dataset(
+                "coords", data=coords.astype(np.int32), compression="gzip"
+            )
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output_dir",  type=Path, required=True)
-    parser.add_argument("--train_size",  type=int,  default=10_000)
-    parser.add_argument("--val_size",    type=int,  default=2_000)
-    parser.add_argument("--test_size",   type=int,  default=2_000)
-    parser.add_argument("--image_size",  type=int,  default=64)
-    parser.add_argument("--object_type", choices=["patterned", "solid"],
-                        default="patterned")
-    parser.add_argument("--min_sep",     type=int,  default=8)
-    parser.add_argument("--pool_size",   type=int,  default=1,
-                        help="Spatial pooling before saving (1=pixel, 2=quadrant-level, 4=object-level).")
-    parser.add_argument("--random_colors", action="store_true",
-                        help="Sample 4 random colours per image instead of fixed {R,C,G,M}.")
+    parser.add_argument("--output_dir", type=Path, required=True)
+    parser.add_argument("--train_size", type=int, default=10_000)
+    parser.add_argument("--val_size", type=int, default=2_000)
+    parser.add_argument("--test_size", type=int, default=2_000)
+    parser.add_argument("--image_size", type=int, default=64)
+    parser.add_argument(
+        "--object_type", choices=["patterned", "solid"], default="patterned"
+    )
+    parser.add_argument("--min_sep", type=int, default=8)
+    parser.add_argument(
+        "--pool_size",
+        type=int,
+        default=1,
+        help="Spatial pooling before saving (1=pixel, 2=quadrant-level, 4=object-level).",
+    )
+    parser.add_argument(
+        "--random_colors",
+        action="store_true",
+        help="Sample 4 random colours per image instead of fixed {R,C,G,M}.",
+    )
     args = parser.parse_args()
 
     if args.image_size % args.pool_size != 0:
@@ -137,16 +147,16 @@ def main():
         )
 
     metadata = {
-        "train_size":    args.train_size,
-        "val_size":      args.val_size,
-        "test_size":     args.test_size,
-        "image_size":    args.image_size,
-        "object_type":   args.object_type,
-        "min_sep":       args.min_sep,
-        "pool_size":     args.pool_size,
+        "train_size": args.train_size,
+        "val_size": args.val_size,
+        "test_size": args.test_size,
+        "image_size": args.image_size,
+        "object_type": args.object_type,
+        "min_sep": args.min_sep,
+        "pool_size": args.pool_size,
         "random_colors": args.random_colors,
-        "n_tokens":           (args.image_size // args.pool_size) ** 2,
-        "feature_dim":        3,
+        "n_tokens": (args.image_size // args.pool_size) ** 2,
+        "feature_dim": 3,
         "background_sentinel": BACKGROUND_SENTINEL,
     }
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -155,8 +165,8 @@ def main():
 
     for split, n in [
         ("train", args.train_size),
-        ("val",   args.val_size),
-        ("test",  args.test_size),
+        ("val", args.val_size),
+        ("test", args.test_size),
     ]:
         print(f"\n{split} ({n} samples)...")
         _extract_split(
