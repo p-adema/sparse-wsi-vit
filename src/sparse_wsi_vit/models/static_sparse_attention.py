@@ -1,5 +1,5 @@
 """
-Block-sparse static attention for WSI slide encoding.
+Approach A: Block-sparse static attention for WSI slide encoding.
 
 Uses custom Triton block-sparse FlashAttention kernels for patch tokens
 and standard SDPA for CLS tokens.  Compatible with torch.utils.checkpoint
@@ -155,11 +155,6 @@ class StaticSparseAttention(nn.Module):
         batch_size, seq_len, _ = x.shape
         num_cls = self.num_cls
 
-        # --- QKV projection ---
-        # Make QKV contiguous after permute so Q, K, V get standard strides.
-        # Without this, unbind(0) produces views with an interleaved stride
-        # pattern (heads interleaved with QKV components) that causes illegal
-        # memory access in the Triton kernel for certain sequence lengths.
         qkv = self.qkv(x).reshape(batch_size, seq_len, 3, self.num_heads, self.head_dim)
         qkv = qkv.permute(2, 0, 3, 1, 4).contiguous()  # (3, batch, heads, seq_len, head_dim)
         q, k, v = qkv.unbind(0)  # each: (batch, heads, seq_len, head_dim), contiguous

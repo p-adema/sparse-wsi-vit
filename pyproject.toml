@@ -33,18 +33,27 @@ dependencies = [
     "ty>=0.0.30",
     #    "vit-5",
     "wandb>=0.25.1",
-    "nystrom-attention>=0.0.13"
+    "nystrom-attention>=0.0.13",
+    "nvidia-cutlass-dsl[cu13]>=4.5.1", # snellius has CUDA13, change if local needs cu12
+    "cuda-python>=13.2.0",
+    "flash-attn",
 ]
 
 [build-system]
 requires = ["uv_build>=0.11.6,<0.12.0"]
 build-backend = "uv_build"
 
-#[tool.uv.workspace]
-#members = ["src/ViT-5"]
-#
-#[tool.uv.sources]
-#vit-5 = { workspace = true }
+[tool.uv.extra-build-dependencies]
+flash-attn = [{ requirement = "torch", match-runtime = true }]
 
+[tool.uv.extra-build-variables]
+# Adjust down if your machine is low on RAM (This uses up to around 90GB)
+flash-attn = { MAX_JOBS = "8" }
+
+# Or if compilation is very unlikely to succeed, try uncommenting this line instead:
+#flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
+
+[tool.ruff.lint]
+ignore = ["SIM300"]
 
 

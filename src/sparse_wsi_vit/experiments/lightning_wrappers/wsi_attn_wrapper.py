@@ -91,6 +91,8 @@ class WSIAttnWrapper(LightningWrapperBase):
         coords = batch["coords"]
         labels = batch["label"]
 
+        torch._dynamo.mark_dynamic(inputs, 1)
+        torch._dynamo.mark_dynamic(coords, 1)
         output_dict = self.network(inputs, coords)
 
         logits = output_dict["logits"].squeeze(1)
@@ -202,10 +204,11 @@ class WSIAttnWrapper(LightningWrapperBase):
         labels = batch["label"]
         batch_size = batch["input"].size(0)
         num_patches = batch["input"].size(1)
+        logits = output_dict["logits"]
         self.val_precision.update(preds, labels)
         self.val_recall.update(preds, labels)
         self.val_f1.update(preds, labels)
-        self.val_auc.update(preds, labels)
+        self.val_auc.update(logits, labels)
         self.log(
             f"{kind}/loss",
             loss,
@@ -221,7 +224,6 @@ class WSIAttnWrapper(LightningWrapperBase):
             batch_size=batch_size,
         )
         self.log(f"{kind}/step_ms", step_ms, on_epoch=True, batch_size=batch_size)
-        logits = output_dict["logits"]
         self.log(
             f"{kind}/logits_mean",
             logits.mean(),
