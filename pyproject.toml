@@ -34,9 +34,10 @@ dependencies = [
     #    "vit-5",
     "wandb>=0.25.1",
     "nystrom-attention>=0.0.13",
-    "nvidia-cutlass-dsl[cu13]>=4.5.1", # snellius has CUDA13, change if local needs cu12
-    "cuda-python>=13.2.0",
-    "flash-attn",
+    #    "nvidia-cutlass-dsl[cu13]>=4.5.1", # snellius has CUDA13, change if local needs cu12
+    #    "cuda-python>=13.2.0",
+    #    "flash-attn",
+    "pyfast==4.11.0", # the rest have segfaults (:
 ]
 
 [build-system]
