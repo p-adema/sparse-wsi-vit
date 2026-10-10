@@ -3,11 +3,12 @@
 
 Four 4×4-pixel objects placed at random positions in a 32×32 black image.
 Label=1 when exactly one matching pair exists among the four objects;
-label=0 when all four are distinct.
+label=0 for all-distinct objects, two pairs, a triple, or four matching objects.
+The four negative configurations are sampled with equal probability.
 
-With random_colors=True (used in experiments): each object independently
-samples 4 random RGB colors from Uniform([0,1]³). The matching pair in
-label=1 is pixel-identical. Solid-color control (object_type="solid"):
+With random_colors=True (used in experiments): each distinct object type
+independently samples 4 random RGB colors from Uniform([0,1]³). Objects of
+the same type are pixel-identical. Solid-color control (object_type="solid"):
 each object is one solid random color; mean color IS discriminative.
 
 Usage (visualization)--See extract_mondriaan.py for (large-scale) data extraction.
@@ -64,7 +65,7 @@ _PATTERNED_PERMS = [
 ]
 
 # ── solid-colour control vocabulary (fixed-colour mode) ───────────────────────
-# Mean color IS discriminative (label=1 biases the mean; label=0 is grey).
+# Solid object identity is determined by its color alone.
 SOLID_VOCAB = [
     [_R, _R, _R, _R],  # 0 – solid red
     [_C, _C, _C, _C],  # 1 – solid cyan
@@ -124,16 +125,20 @@ class MondriaanGenerator:
             ``"solid"`` (control, pooling succeeds).
         target_label:
             Force label to 0 or 1. None → chosen uniformly at random.
+            Label 0 samples all-distinct, two-pair, triple, and quadruple
+            configurations uniformly; label 1 always has one pair and two
+            distinct singletons.
         min_sep:
             Minimum Euclidean distance between object top-left corners (px).
         random_colors:
-            If True, sample 4 colors uniformly from [0,1]^3 per image.
+            If True, sample independent colors uniformly from [0,1]^3
+            for each distinct object type. Repeated types reuse their colors.
 
         Returns
         -------
         image : np.ndarray, shape (H, W, 3), float32
         label : int, 0 or 1
-        obj_types : list[int], indices into the vocabulary (length 4)
+        obj_types : list[int], object type IDs within the sample (length 4)
         positions : list[tuple[int, int]], top-left (y, x) corners (length 4)
         """
         image = np.zeros((image_size, image_size, 3), dtype=np.float32)
@@ -142,51 +147,37 @@ class MondriaanGenerator:
         if target_label is None:
             target_label = random.randint(0, 1)
 
-        if random_colors and object_type == "patterned":
-
-            def _rand_pat():
-                return np.random.uniform(0, 1, size=(4, 3)).astype(np.float32)
-
-            if target_label == 1:
-                pair_pat = _rand_pat()
-                entries = [
-                    (pair_pat, 0),
-                    (pair_pat, 0),
-                    (_rand_pat(), 1),
-                    (_rand_pat(), 2),
-                ]
-            else:
-                entries = [(_rand_pat(), i) for i in range(4)]
-            random.shuffle(entries)
-            pats, obj_types = zip(*entries)
-            obj_types = list(obj_types)
-            for (y, x), (tl, tr, bl, br) in zip(positions, pats):
-                image[y : y + 2, x : x + 2] = tl
-                image[y : y + 2, x + 2 : x + 4] = tr
-                image[y + 2 : y + 4, x : x + 2] = bl
-                image[y + 2 : y + 4, x + 2 : x + 4] = br
+        if target_label == 1:
+            multiplicities = (2, 1, 1)
         else:
-            if random_colors:
-                base = np.random.uniform(0, 1, size=(4, 3)).astype(np.float32)
-                vocab = [[base[i]] * 4 for i in range(4)]
-            else:
-                vocab = PATTERNED_VOCAB if object_type == "patterned" else SOLID_VOCAB
-            n_types = len(vocab)
+            multiplicities = random.choice(
+                ((1, 1, 1, 1), (2, 2), (3, 1), (4,))
+            )
 
-            if target_label == 1:
-                pair = random.randrange(n_types)
-                others = random.sample([t for t in range(n_types) if t != pair], 2)
-                obj_types = [pair, pair] + others
-                random.shuffle(obj_types)
-            else:
-                obj_types = random.sample(range(n_types), 4)
+        if random_colors and object_type == "patterned":
+            # Sample one pattern per distinct type, then reuse it for repeats.
+            vocab = [
+                np.random.uniform(0, 1, size=(4, 3)).astype(np.float32)
+                for _ in multiplicities
+            ]
+        elif random_colors:
+            base = np.random.uniform(0, 1, size=(4, 3)).astype(np.float32)
+            vocab = [[base[i]] * 4 for i in range(4)]
+        else:
+            vocab = PATTERNED_VOCAB if object_type == "patterned" else SOLID_VOCAB
 
-            for (y, x), t in zip(positions, obj_types):
-                tl, tr, bl, br = vocab[t]
-                image[y : y + 2, x : x + 2] = tl
-                image[y : y + 2, x + 2 : x + 4] = tr
-                image[y + 2 : y + 4, x : x + 2] = bl
-                image[y + 2 : y + 4, x + 2 : x + 4] = br
+        distinct_types = random.sample(range(len(vocab)), len(multiplicities))
+        obj_types = [
+            t for t, count in zip(distinct_types, multiplicities) for _ in range(count)
+        ]
+        random.shuffle(obj_types)
+
+        for (y, x), t in zip(positions, obj_types):
+            tl, tr, bl, br = vocab[t]
+            image[y : y + 2, x : x + 2] = tl
+            image[y : y + 2, x + 2 : x + 4] = tr
+            image[y + 2 : y + 4, x : x + 2] = bl
+            image[y + 2 : y + 4, x + 2 : x + 4] = br
 
         # strict label check — same rule as HalliGalli
         counts = Counter(obj_types)

@@ -97,10 +97,12 @@ Each `.h5` file contains per-slide embeddings at all scales used in the paper (`
 
 Mondriaan is a synthetic pixel-level benchmark designed to expose the limitations of pooling-based MIL methods. Four
 4×4-pixel objects are placed at random positions in a 32×32 black image. The label is 1 when exactly one matching pair
-exists among the four objects, and 0 when all four are distinct. Each object independently samples 4 random RGB colors,
-making the matching pair pixel-identical but leaving no discriminative mean-color signal for pooling-based aggregators (
-ABMIL). A solid-color control variant is included where mean color IS discriminative, confirming that failure on the
-patterned task is arrangement-specific.
+exists among the four objects, and 0 for all-distinct objects, two pairs, a triple, or four matching objects. The four
+negative configurations are sampled with equal probability, while the overall label distribution remains balanced.
+With `random_colors=True`, each distinct object type independently samples four RGB colors; repeated types reuse
+the same pixel pattern. With `random_colors=False`, types are permutations of a shared four-color palette and all
+objects have the same mean color. Pooling behavior depends on tokenization: averaging a complete fixed-color object
+discards its pattern, while flattening its ordered pixels preserves it. A solid-color control variant is also included.
 
 Data must be pre-extracted to HDF5 using `extract_mondriaan.py` before training. The dataset split is fixed at 10 000
 train / 2 000 val / 2 000 test with a balanced label distribution.
@@ -113,7 +115,6 @@ uv run src/sparse_wsi_vit/datasets/mondriaan_dataset/extract_mondriaan.py \
 uv run src/sparse_wsi_vit/datasets/mondriaan_dataset/extract_mondriaan.py \
     --output_dir data/mondriaan/patterned_ps2 --image_size 32 --pool_size 2 --random_colors
 ```
-
 ---
 
 ## Running experiments

@@ -75,7 +75,11 @@ class VisionRotaryEmbedding(nn.Module):
         if not self.dynamic:
             # Fixed, dense image
             ft_seq_len = int(np.sqrt(x.shape[1]))
-            t = torch.arange(ft_seq_len).cuda() / ft_seq_len * self.pt_seq_len
+            t = (
+                torch.arange(ft_seq_len, device=x.device)
+                / ft_seq_len
+                * self.pt_seq_len
+            )
 
             freqs = torch.einsum("..., f -> ... f", t, self.freqs)
             freqs = repeat(freqs, "... n -> ... (n r)", r=2)  # 14*32
