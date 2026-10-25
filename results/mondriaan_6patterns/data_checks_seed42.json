@@ -1,0 +1,57 @@
+{
+  "training_unique_type_multisets": 119,
+  "training_vocabulary_size": 6,
+  "novel_vocabulary_size": 18,
+  "evaluations": {
+    "standard": {
+      "samples": 1024,
+      "identical_images_in_training": 0,
+      "foreground_pixel_count": 64,
+      "foreground_block_counts": [
+        4
+      ],
+      "unique_type_multisets": 125,
+      "distinct_object_types_observed": 6
+    },
+    "novel_permutations": {
+      "samples": 1024,
+      "identical_images_in_training": 0,
+      "foreground_pixel_count": 64,
+      "foreground_block_counts": [
+        4
+      ],
+      "unique_type_multisets": 802,
+      "distinct_object_types_observed": 18
+    },
+    "shift_control": {
+      "samples": 1024,
+      "identical_images_in_training": 0,
+      "foreground_pixel_count": 64,
+      "foreground_block_counts": [
+        4
+      ],
+      "unique_type_multisets": 126,
+      "distinct_object_types_observed": 6
+    },
+    "shift_1px": {
+      "samples": 1024,
+      "identical_images_in_training": 0,
+      "foreground_pixel_count": 64,
+      "foreground_block_counts": [
+        16
+      ],
+      "unique_type_multisets": 126,
+      "distinct_object_types_observed": 6
+    },
+    "shift_2px": {
+      "samples": 1024,
+      "identical_images_in_training": 0,
+      "foreground_pixel_count": 64,
+      "foreground_block_counts": [
+        16
+      ],
+      "unique_type_multisets": 126,
+      "distinct_object_types_observed": 6
+    }
+  }
+}

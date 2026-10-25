@@ -1,0 +1,379 @@
+{
+  "settings": {
+    "model": "abmil",
+    "representation": "x_tokens64",
+    "seed": 42,
+    "train_size": 512,
+    "eval_size": 1024,
+    "batch_size": 32,
+    "steps": 2000,
+    "lr": 0.0002,
+    "threads": 2,
+    "random_colors": false,
+    "device": "cpu",
+    "precision": "float32",
+    "weight_decay": 0.0001,
+    "grad_clip": 1.0,
+    "scheduler": "constant learning rate",
+    "sampler_seed": 1042
+  },
+  "parameters": 177539,
+  "tokens_per_sample": 64,
+  "evaluation_tokens": {
+    "standard": 64
+  },
+  "history": [
+    {
+      "step": 0,
+      "seconds": 1.183943822979927e-06,
+      "train": {
+        "loss": 0.6998664140701294,
+        "accuracy": 0.5,
+        "margin_std": 0.0032445420511066914,
+        "by_case": {
+          "all_distinct": {
+            "count": 64,
+            "accuracy": 0.0
+          },
+          "one_pair": {
+            "count": 256,
+            "accuracy": 1.0
+          },
+          "two_pairs": {
+            "count": 64,
+            "accuracy": 0.0
+          },
+          "three_matching": {
+            "count": 64,
+            "accuracy": 0.0
+          },
+          "four_matching": {
+            "count": 64,
+            "accuracy": 0.0
+          }
+        }
+      },
+      "evaluation": {
+        "loss": 0.6998578906059265,
+        "accuracy": 0.5,
+        "margin_std": 0.0033088659401983023,
+        "by_case": {
+          "all_distinct": {
+            "count": 128,
+            "accuracy": 0.0
+          },
+          "one_pair": {
+            "count": 512,
+            "accuracy": 1.0
+          },
+          "two_pairs": {
+            "count": 128,
+            "accuracy": 0.0
+          },
+          "three_matching": {
+            "count": 128,
+            "accuracy": 0.0
+          },
+          "four_matching": {
+            "count": 128,
+            "accuracy": 0.0
+          }
+        }
+      }
+    },
+    {
+      "step": 400,
+      "seconds": 5.017204614006914,
+      "train": {
+        "loss": 0.6320275068283081,
+        "accuracy": 0.625,
+        "margin_std": 0.8394634127616882,
+        "by_case": {
+          "all_distinct": {
+            "count": 64,
+            "accuracy": 0.265625
+          },
+          "one_pair": {
+            "count": 256,
+            "accuracy": 0.6640625
+          },
+          "two_pairs": {
+            "count": 64,
+            "accuracy": 0.609375
+          },
+          "three_matching": {
+            "count": 64,
+            "accuracy": 0.578125
+          },
+          "four_matching": {
+            "count": 64,
+            "accuracy": 0.890625
+          }
+        }
+      },
+      "evaluation": {
+        "loss": 0.6536350250244141,
+        "accuracy": 0.5810546875,
+        "margin_std": 0.8634535670280457,
+        "by_case": {
+          "all_distinct": {
+            "count": 128,
+            "accuracy": 0.140625
+          },
+          "one_pair": {
+            "count": 512,
+            "accuracy": 0.646484375
+          },
+          "two_pairs": {
+            "count": 128,
+            "accuracy": 0.515625
+          },
+          "three_matching": {
+            "count": 128,
+            "accuracy": 0.515625
+          },
+          "four_matching": {
+            "count": 128,
+            "accuracy": 0.890625
+          }
+        }
+      }
+    },
+    {
+      "step": 800,
+      "seconds": 9.95079368702136,
+      "train": {
+        "loss": 0.6299777030944824,
+        "accuracy": 0.625,
+        "margin_std": 1.2977612018585205,
+        "by_case": {
+          "all_distinct": {
+            "count": 64,
+            "accuracy": 0.265625
+          },
+          "one_pair": {
+            "count": 256,
+            "accuracy": 0.6640625
+          },
+          "two_pairs": {
+            "count": 64,
+            "accuracy": 0.609375
+          },
+          "three_matching": {
+            "count": 64,
+            "accuracy": 0.578125
+          },
+          "four_matching": {
+            "count": 64,
+            "accuracy": 0.890625
+          }
+        }
+      },
+      "evaluation": {
+        "loss": 0.6583470702171326,
+        "accuracy": 0.5810546875,
+        "margin_std": 1.3254567384719849,
+        "by_case": {
+          "all_distinct": {
+            "count": 128,
+            "accuracy": 0.140625
+          },
+          "one_pair": {
+            "count": 512,
+            "accuracy": 0.646484375
+          },
+          "two_pairs": {
+            "count": 128,
+            "accuracy": 0.515625
+          },
+          "three_matching": {
+            "count": 128,
+            "accuracy": 0.515625
+          },
+          "four_matching": {
+            "count": 128,
+            "accuracy": 0.890625
+          }
+        }
+      }
+    },
+    {
+      "step": 1200,
+      "seconds": 14.889289145939983,
+      "train": {
+        "loss": 0.627608060836792,
+        "accuracy": 0.611328125,
+        "margin_std": 1.3997291326522827,
+        "by_case": {
+          "all_distinct": {
+            "count": 64,
+            "accuracy": 0.125
+          },
+          "one_pair": {
+            "count": 256,
+            "accuracy": 0.828125
+          },
+          "two_pairs": {
+            "count": 64,
+            "accuracy": 0.375
+          },
+          "three_matching": {
+            "count": 64,
+            "accuracy": 0.390625
+          },
+          "four_matching": {
+            "count": 64,
+            "accuracy": 0.6875
+          }
+        }
+      },
+      "evaluation": {
+        "loss": 0.648489773273468,
+        "accuracy": 0.5810546875,
+        "margin_std": 1.431969404220581,
+        "by_case": {
+          "all_distinct": {
+            "count": 128,
+            "accuracy": 0.0859375
+          },
+          "one_pair": {
+            "count": 512,
+            "accuracy": 0.787109375
+          },
+          "two_pairs": {
+            "count": 128,
+            "accuracy": 0.359375
+          },
+          "three_matching": {
+            "count": 128,
+            "accuracy": 0.3125
+          },
+          "four_matching": {
+            "count": 128,
+            "accuracy": 0.7421875
+          }
+        }
+      }
+    },
+    {
+      "step": 1600,
+      "seconds": 19.880255301017314,
+      "train": {
+        "loss": 0.6269118189811707,
+        "accuracy": 0.625,
+        "margin_std": 1.4149199724197388,
+        "by_case": {
+          "all_distinct": {
+            "count": 64,
+            "accuracy": 0.265625
+          },
+          "one_pair": {
+            "count": 256,
+            "accuracy": 0.6640625
+          },
+          "two_pairs": {
+            "count": 64,
+            "accuracy": 0.609375
+          },
+          "three_matching": {
+            "count": 64,
+            "accuracy": 0.578125
+          },
+          "four_matching": {
+            "count": 64,
+            "accuracy": 0.890625
+          }
+        }
+      },
+      "evaluation": {
+        "loss": 0.6446957588195801,
+        "accuracy": 0.5810546875,
+        "margin_std": 1.4470932483673096,
+        "by_case": {
+          "all_distinct": {
+            "count": 128,
+            "accuracy": 0.140625
+          },
+          "one_pair": {
+            "count": 512,
+            "accuracy": 0.646484375
+          },
+          "two_pairs": {
+            "count": 128,
+            "accuracy": 0.515625
+          },
+          "three_matching": {
+            "count": 128,
+            "accuracy": 0.515625
+          },
+          "four_matching": {
+            "count": 128,
+            "accuracy": 0.890625
+          }
+        }
+      }
+    },
+    {
+      "step": 2000,
+      "seconds": 24.907557636965066,
+      "train": {
+        "loss": 0.614873468875885,
+        "accuracy": 0.6171875,
+        "margin_std": 1.4624907970428467,
+        "by_case": {
+          "all_distinct": {
+            "count": 64,
+            "accuracy": 0.0
+          },
+          "one_pair": {
+            "count": 256,
+            "accuracy": 0.796875
+          },
+          "two_pairs": {
+            "count": 64,
+            "accuracy": 0.390625
+          },
+          "three_matching": {
+            "count": 64,
+            "accuracy": 0.46875
+          },
+          "four_matching": {
+            "count": 64,
+            "accuracy": 0.890625
+          }
+        }
+      },
+      "evaluation": {
+        "loss": 0.632938802242279,
+        "accuracy": 0.609375,
+        "margin_std": 1.4959403276443481,
+        "by_case": {
+          "all_distinct": {
+            "count": 128,
+            "accuracy": 0.0
+          },
+          "one_pair": {
+            "count": 512,
+            "accuracy": 0.78125
+          },
+          "two_pairs": {
+            "count": 128,
+            "accuracy": 0.4140625
+          },
+          "three_matching": {
+            "count": 128,
+            "accuracy": 0.4453125
+          },
+          "four_matching": {
+            "count": 128,
+            "accuracy": 0.890625
+          }
+        }
+      },
+      "robustness": {},
+      "foreground_attention_mass": 0.9999746680259705,
+      "uniform_foreground_attention_mass": 0.0625
+    }
+  ],
+  "seconds": 25.155140177928843
+}
