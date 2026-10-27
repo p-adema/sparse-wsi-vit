@@ -37,6 +37,7 @@ from sparse_wsi_vit.datasets.mondriaan_dataset.mondriaan import (
 )
 from sparse_wsi_vit.models.abmil import ABMIL
 from sparse_wsi_vit.models.vit5_dense import VitDensePreEmbedded
+from sparse_wsi_vit.models.transmil import TransMIL
 
 
 def novel_vocabulary():
@@ -134,7 +135,11 @@ def build_model(name):
             in_features=48, input_proj_dim=256, hidden_dim=256, out_features=2,
             num_branches=1, attention_dropout=0.25,
         ))
-    return CoordinateAdapter(MeanMIL())
+    if name == "meanmlp":
+        return CoordinateAdapter(MeanMIL())
+    if name == "transmil":
+        return CoordinateAdapter(TransMIL(in_features=48, out_features=2))
+    raise ValueError(f"Unknown model: {name}")
 
 
 def data_checks(train, views):
@@ -162,7 +167,106 @@ def data_checks(train, views):
     return checks
 
 
+def train_one_device(name, representation, seed, train, views, args):
+    """CUDA-capable Mondriaan trainer; samples remain on CPU, batches move to GPU."""
+    device = torch.device(getattr(args, "device", "cpu"))
+    if device.type == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA requested but no GPU is available")
+    torch.manual_seed(seed)
+    if device.type == "cuda":
+        torch.cuda.manual_seed_all(seed)
+    model = build_model(name).to(device)
+    sampler = torch.Generator().manual_seed(seed + 1000)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    eval_batch_size = getattr(args, "eval_batch_size", args.batch_size)
+    report = {
+        "settings": {"model": name, "representation": representation, "seed": seed,
+                     "train_size": args.train_size, "eval_size": args.eval_size,
+                     "batch_size": args.batch_size, "eval_batch_size": eval_batch_size,
+                     "steps": args.steps, "lr": args.lr, "threads": args.threads,
+                     "random_colors": False, "device": str(device), "precision": "float32",
+                     "weight_decay": 1e-4, "grad_clip": 1.0,
+                     "scheduler": "constant learning rate", "sampler_seed": seed + 1000},
+        "parameters": sum(p.numel() for p in model.parameters()),
+        "tokens_per_sample": train["x"].shape[1],
+        "evaluation_tokens": {key: data["x"].shape[1] for key, data in views.items()},
+        "history": [],
+    }
+    output = args.output_dir / f"{name}_{representation}_seed{seed}.json"
+    started = time.perf_counter()
+
+    def logits_for(data, indices):
+        x = data["x"][indices].to(device)
+        coords = data["coords"][indices].to(device)
+        return model(x, coords)["logits"]
+
+    @torch.inference_mode()
+    def eval_view(data):
+        model.eval()
+        correct, total, loss_sum = 0, 0, 0.0
+        for start in range(0, len(data["y"]), eval_batch_size):
+            indices = slice(start, start + eval_batch_size)
+            y = data["y"][indices].to(device).long()
+            logits = logits_for(data, indices)
+            correct += (logits.argmax(dim=-1) == y).sum().item()
+            loss_sum += F.cross_entropy(logits, y, reduction="sum").item()
+            total += y.numel()
+        return {"accuracy": correct / total, "loss": loss_sum / total}
+
+    def record(step, final=False):
+        if device.type == "cuda":
+            torch.cuda.synchronize()
+        metrics = {"step": step, "seconds": time.perf_counter() - started,
+                   "train": eval_view(train), "evaluation": eval_view(views["standard"])}
+        if final:
+            metrics["robustness"] = {key: eval_view(data) for key, data in views.items()
+                                     if key != "standard"}
+            if name == "abmil":
+                model.eval()
+                with torch.inference_mode():
+                    mass = []
+                    data = views["standard"]
+                    for start in range(0, len(data["y"]), eval_batch_size):
+                        x = data["x"][start:start + eval_batch_size].to(device)
+                        weights = model.model(x, return_attention=True)["attention"][:, 0]
+                        foreground = ~(x == -1).all(dim=-1)
+                        mass.append((weights * foreground).sum(dim=1).cpu())
+                    metrics["foreground_attention_mass"] = torch.cat(mass).mean().item()
+                    metrics["uniform_foreground_attention_mass"] = 4 / train["x"].shape[1]
+        if device.type == "cuda":
+            torch.cuda.synchronize()
+        metrics["seconds"] = time.perf_counter() - started
+        report["history"].append(metrics)
+        report["seconds"] = metrics["seconds"]
+        output.write_text(json.dumps(report, indent=2) + "\n")
+        print(f"{name}/{representation}/seed{seed} step={step} "
+              f"train={metrics['train']['accuracy']:.3f} "
+              f"eval={metrics['evaluation']['accuracy']:.3f} "
+              f"seconds={report['seconds']:.1f}", flush=True)
+        if final:
+            print("robustness=" + json.dumps({key: value["accuracy"]
+                  for key, value in metrics["robustness"].items()}), flush=True)
+
+    record(0)
+    for step in range(1, args.steps + 1):
+        model.train()
+        indices = balanced_indices(train, args.batch_size, generator=sampler)
+        optimizer.zero_grad(set_to_none=True)
+        y = train["y"][indices].to(device).long()
+        loss = F.cross_entropy(logits_for(train, indices), y)
+        if not torch.isfinite(loss).item():
+            raise RuntimeError(f"Non-finite training loss at step {step}")
+        loss.backward()
+        nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        optimizer.step()
+        if step % args.eval_every == 0 or step == args.steps:
+            record(step, final=step == args.steps)
+    return report
+
+
 def train_one(name, representation, seed, train, views, args):
+    if getattr(args, "device", "cpu") != "cpu" or name == "transmil":
+        return train_one_device(name, representation, seed, train, views, args)
     torch.manual_seed(seed)
     model = build_model(name).cpu()
     # Sampling is independent of model initialization, architecture, and dropout.
@@ -237,7 +341,9 @@ def main():
     parser.add_argument("--eval-every", type=int, default=400)
     parser.add_argument("--lr", type=float, default=2e-4)
     parser.add_argument("--threads", type=int, default=2)
-    parser.add_argument("--models", nargs="+", choices=("vit5", "abmil", "meanmlp"),
+    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    parser.add_argument("--eval-batch-size", type=int, default=8)
+    parser.add_argument("--models", nargs="+", choices=("vit5", "abmil", "meanmlp", "transmil"),
                         default=["vit5", "abmil", "meanmlp"])
     parser.add_argument("--representations", nargs="+", choices=("foreground", "grid"),
                         default=["foreground", "grid"])
