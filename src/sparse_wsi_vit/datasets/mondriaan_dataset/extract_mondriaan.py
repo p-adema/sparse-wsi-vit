@@ -71,6 +71,8 @@ def _extract_split(
     pool_size: int,
     output_dir: Path,
     random_colors: bool = False,
+    free_positions: bool = False,
+    extra_patterns: bool = False,
 ):
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -81,6 +83,8 @@ def _extract_split(
             target_label=idx % 2,  # balanced labels within each split
             min_sep=min_sep,
             random_colors=random_colors,
+            free_positions=free_positions,
+            extra_patterns=extra_patterns,
         )
 
         if pool_size == 1:
@@ -139,6 +143,16 @@ def main():
         action="store_true",
         help="Sample 4 random colours per image instead of fixed {R,C,G,M}.",
     )
+    parser.add_argument(
+        "--free_positions",
+        action="store_true",
+        help="Place objects at any pixel position instead of the 4-pixel grid.",
+    )
+    parser.add_argument(
+        "--extra_patterns",
+        action="store_true",
+        help="Use 12 patterns instead of 6 (fixed colours only).",
+    )
     args = parser.parse_args()
 
     if args.image_size % args.pool_size != 0:
@@ -155,6 +169,8 @@ def main():
         "min_sep": args.min_sep,
         "pool_size": args.pool_size,
         "random_colors": args.random_colors,
+        "free_positions": args.free_positions,
+        "extra_patterns": args.extra_patterns,
         "n_tokens": (args.image_size // args.pool_size) ** 2,
         "feature_dim": 3,
         "background_sentinel": BACKGROUND_SENTINEL,
@@ -178,6 +194,8 @@ def main():
             pool_size=args.pool_size,
             output_dir=args.output_dir,
             random_colors=args.random_colors,
+            free_positions=args.free_positions,
+            extra_patterns=args.extra_patterns,
         )
 
     print("\nDone.")
