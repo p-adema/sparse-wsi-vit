@@ -21,6 +21,9 @@ import torch
 import torch.nn.functional as F
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts.mondriaan_metrics import metrics_from_logits
 
 from sparse_wsi_vit.datasets.mondriaan_dataset.extract_mondriaan import (
     BACKGROUND_SENTINEL,
@@ -129,15 +132,17 @@ def evaluate(model, data, batch_size):
         for start in range(0, len(data["y"]), batch_size)
     ])
     correct = logits.argmax(dim=1) == data["y"]
-    metrics = {
-        "loss": F.cross_entropy(logits, data["y"]).item(),
-        "accuracy": correct.float().mean().item(),
-        "margin_std": (logits[:, 1] - logits[:, 0]).std().item(),
-        "by_case": {
-            case: {"count": len(indices), "accuracy": correct[indices].float().mean().item()}
-            for case, indices in data["indices"].items()
-        },
+    metrics = metrics_from_logits(logits, data["y"], data["cases"])
+    # Retain the historical observed-case count/accuracy schema for controls
+    # that compare continued checkpoints with their saved parent reports.
+    metrics["by_case"] = {
+        case: {"count": len(indices), "accuracy": correct[indices].float().mean().item()}
+        for case, indices in data["indices"].items() if len(indices)
     }
+    metrics.update({
+        "loss": F.cross_entropy(logits, data["y"]).item(),
+        "margin_std": (logits[:, 1] - logits[:, 0]).std().item(),
+    })
     if "unseen_combinations" in data:
         unseen = data["unseen_combinations"]
         metrics["unseen_combinations"] = {
@@ -236,6 +241,10 @@ def main():
               f"train_acc={metrics['train']['accuracy']:.3f} "
               f"eval_loss={metrics['evaluation']['loss']:.6f} "
               f"eval_acc={metrics['evaluation']['accuracy']:.3f} "
+              f"eval_worst={metrics['evaluation']['worst_case_accuracy']:.3f} "
+              f"eval_macro_case={metrics['evaluation']['macro_case_accuracy']:.3f} "
+              f"eval_positive_f1={metrics['evaluation']['positive_f1']:.3f} "
+              f"eval_binary_macro_f1={metrics['evaluation']['binary_macro_f1']:.3f} "
               f"margin_std={metrics['train']['margin_std']:.3e} "
               f"seconds={time.perf_counter() - started:.1f}", flush=True)
 

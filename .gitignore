@@ -212,3 +212,6 @@ __marimo__/
 
 
 notebooks/
+
+# macOS metadata
+.DS_Store

@@ -162,11 +162,20 @@ def data_checks(train, views):
     return checks
 
 
-def train_one(name, representation, seed, train, views, args):
+def train_one(name, representation, seed, train, views, args, *,
+              experiment_settings=None, save_checkpoint=False,
+              batch_sampler=balanced_indices, initial_checkpoint=None,
+              sampler_seed=None):
     torch.manual_seed(seed)
     model = build_model(name).cpu()
+    parent_settings = None
+    if initial_checkpoint is not None:
+        loaded = torch.load(initial_checkpoint, map_location="cpu", weights_only=True)
+        model.load_state_dict(loaded["model_state"])
+        parent_settings = loaded["settings"]
     # Sampling is independent of model initialization, architecture, and dropout.
-    sampler = torch.Generator().manual_seed(seed + 1000)
+    sampler_seed = seed + 1000 if sampler_seed is None else sampler_seed
+    sampler = torch.Generator().manual_seed(sampler_seed)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     report = {
         "settings": {"model": name, "representation": representation, "seed": seed,
@@ -174,12 +183,18 @@ def train_one(name, representation, seed, train, views, args):
                      "batch_size": args.batch_size, "steps": args.steps, "lr": args.lr,
                      "threads": args.threads, "random_colors": False, "device": "cpu",
                      "precision": "float32", "weight_decay": 1e-4, "grad_clip": 1.0,
-                     "scheduler": "constant learning rate", "sampler_seed": seed + 1000},
+                     "scheduler": "constant learning rate", "sampler_seed": sampler_seed,
+                     **(experiment_settings or {})},
         "parameters": sum(p.numel() for p in model.parameters()),
         "tokens_per_sample": train["x"].shape[1],
+        "checkpoint_selection": "final update; development evaluation does not select a checkpoint",
         "evaluation_tokens": {key: data["x"].shape[1] for key, data in views.items()},
         "history": [],
     }
+    if initial_checkpoint is not None:
+        report["initial_checkpoint"] = str(initial_checkpoint)
+        report["parent_settings"] = parent_settings
+        report["optimizer_restarted"] = True
     output = args.output_dir / f"{name}_{representation}_seed{seed}.json"
     started = time.perf_counter()
 
@@ -190,16 +205,25 @@ def train_one(name, representation, seed, train, views, args):
         if final:
             metrics["robustness"] = {key: evaluate(model, data, args.batch_size)
                                      for key, data in views.items() if key != "standard"}
+            if save_checkpoint:
+                checkpoint = output.with_suffix(".pt")
+                torch.save({"settings": report["settings"], "model_state": model.state_dict(),
+                            "optimizer_state": optimizer.state_dict(), "step": step,
+                            "sampler_state": sampler.get_state(),
+                            "torch_rng_state": torch.get_rng_state()},
+                           checkpoint)
+                report["checkpoint"] = str(checkpoint)
             if name == "abmil":
                 with torch.inference_mode():
-                    mass = []
-                    for start in range(0, args.eval_size, args.batch_size):
+                    mass, uniform_mass = [], []
+                    for start in range(0, len(views["standard"]["y"]), args.batch_size):
                         x = views["standard"]["x"][start:start + args.batch_size]
                         weights = model.model(x, return_attention=True)["attention"][:, 0]
                         foreground = ~(x == -1).all(dim=-1)
                         mass.append((weights * foreground).sum(dim=1))
+                        uniform_mass.append(foreground.float().mean(dim=1))
                     metrics["foreground_attention_mass"] = torch.cat(mass).mean().item()
-                    metrics["uniform_foreground_attention_mass"] = 4 / train["x"].shape[1]
+                    metrics["uniform_foreground_attention_mass"] = torch.cat(uniform_mass).mean().item()
         report["history"].append(metrics)
         report["seconds"] = time.perf_counter() - started
         output.write_text(json.dumps(report, indent=2) + "\n")
@@ -207,6 +231,11 @@ def train_one(name, representation, seed, train, views, args):
               f"train={metrics['train']['accuracy']:.3f} "
               f"eval={metrics['evaluation']['accuracy']:.3f} "
               f"seconds={report['seconds']:.1f}", flush=True)
+        case_metrics = metrics["evaluation"]
+        print("case_metrics=" + json.dumps({key: case_metrics.get(key) for key in (
+            "worst_case_accuracy", "macro_case_accuracy", "positive_precision",
+            "positive_recall", "positive_f1", "binary_macro_f1", "confusion_matrix",
+            "all_case_counts", "all_case_accuracies", "selection_eligible")}), flush=True)
         if final:
             print("robustness=" + json.dumps({key: value["accuracy"]
                   for key, value in metrics["robustness"].items()}), flush=True)
@@ -214,7 +243,7 @@ def train_one(name, representation, seed, train, views, args):
     record(0)
     for step in range(1, args.steps + 1):
         model.train()
-        indices = balanced_indices(train, args.batch_size, generator=sampler)
+        indices = batch_sampler(train, args.batch_size, generator=sampler)
         optimizer.zero_grad(set_to_none=True)
         loss = F.cross_entropy(forward(model, train, indices), train["y"][indices])
         if not torch.isfinite(loss):
