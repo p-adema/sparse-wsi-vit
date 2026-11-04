@@ -49,6 +49,22 @@ PATTERNED_NAMES = [
     "MG/CR",
     "RG/MC",
     "CM/GR",
+    "RM/CG",
+    "CG/RM",
+    "GR/CM",
+    "GC/MR",
+    "MR/GC",
+    "MC/RG",
+]
+# The other 6 even permutations (extra_patterns=True): with the 6 above, all 12 pairwise
+# Hamming distances are still >= 3.
+EXTRA_PATTERNED_VOCAB = [
+    [_R, _M, _C, _G],  # 6
+    [_C, _G, _R, _M],  # 7
+    [_G, _R, _C, _M],  # 8
+    [_G, _C, _M, _R],  # 9
+    [_M, _R, _G, _C],  # 10
+    [_M, _C, _R, _G],  # 11
 ]
 
 # ── permutation indices shared between fixed and random-color modes ──────────
@@ -82,13 +98,13 @@ class MondriaanGenerator:
     """Synthetic pixel-level pattern-matching benchmark generator."""
 
     @staticmethod
-    def _random_positions(image_size: int, n: int, min_sep: int = 16):
-        """Sample n non-overlapping 4×4-aligned top-left corners.
+    def _random_positions(image_size: int, n: int, min_sep: int = 16, step: int = 4):
+        """Sample n non-overlapping top-left corners for 4×4 objects.
 
-        Positions are on a 4-pixel grid (0, 4, 8, …, image_size−4).
+        Positions are on a `step`-pixel grid (step=4: 0, 4, 8, …, image_size−4).
         Euclidean distance between any two top-left corners ≥ min_sep.
         """
-        grid = list(range(0, image_size - 3, 4))
+        grid = list(range(0, image_size - 3, step))
         positions = []
         max_attempts = n * 20_000
         attempts = 0
@@ -113,6 +129,8 @@ class MondriaanGenerator:
         target_label: int | None = None,
         min_sep: int = 16,
         random_colors: bool = False,
+        free_positions: bool = False,
+        extra_patterns: bool = False,
     ):
         """Generate one Mondriaan sample.
 
@@ -133,6 +151,10 @@ class MondriaanGenerator:
         random_colors:
             If True, sample independent colors uniformly from [0,1]^3
             for each distinct object type. Repeated types reuse their colors.
+        free_positions:
+            If True, objects go at any pixel position instead of the 4-pixel grid.
+        extra_patterns:
+            If True (fixed colors), use 12 patterns instead of 6.
 
         Returns
         -------
@@ -142,7 +164,9 @@ class MondriaanGenerator:
         positions : list[tuple[int, int]], top-left (y, x) corners (length 4)
         """
         image = np.zeros((image_size, image_size, 3), dtype=np.float32)
-        positions = MondriaanGenerator._random_positions(image_size, 4, min_sep)
+        positions = MondriaanGenerator._random_positions(
+            image_size, 4, min_sep, step=1 if free_positions else 4
+        )
 
         if target_label is None:
             target_label = random.randint(0, 1)
@@ -165,6 +189,8 @@ class MondriaanGenerator:
             vocab = [[base[i]] * 4 for i in range(4)]
         else:
             vocab = PATTERNED_VOCAB if object_type == "patterned" else SOLID_VOCAB
+            if extra_patterns and object_type == "patterned":
+                vocab = PATTERNED_VOCAB + EXTRA_PATTERNED_VOCAB
 
         distinct_types = random.sample(range(len(vocab)), len(multiplicities))
         obj_types = [

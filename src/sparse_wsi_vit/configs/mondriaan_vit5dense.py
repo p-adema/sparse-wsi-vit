@@ -1,7 +1,8 @@
 """ViT-5 Dense on raw RGB pixel features from the Mondriaan synthetic benchmark.
 
 Input: 1024 raw pixels (32×32 image, pool_size=1), each a 3-dim RGB vector.
-downproj=256 up-projects 3→256 before the transformer.
+A 5×5 conv stem embeds each pixel with its neighbourhood (3→256).
+Data: extract_mondriaan.py --image_size 32 --free_positions --extra_patterns.
 rope_dynamic_high=32 calibrates RoPE for pixel coordinates 0–31.
 
 Expected result: >90% accuracy on patterned — full pairwise attention can
@@ -22,6 +23,7 @@ from sparse_wsi_vit.experiments.default_cfg import (
     WandbConfig,
 )
 from sparse_wsi_vit.experiments.utils.lazy_config import LazyConfig
+from sparse_wsi_vit.models.conv_stem import ConvStem
 from sparse_wsi_vit.models.vit5_dense import VitDensePreEmbedded
 from sparse_wsi_vit.experiments.lightning_wrappers.wsi_attn_wrapper import (
     WSIAttnWrapper,
@@ -60,14 +62,13 @@ def get_config() -> ExperimentConfig:
         num_workers=NUM_WORKERS,
     )
 
-    config.net = LazyConfig(VitDensePreEmbedded)(
-        in_features=IN_FEATURES,
+    vit = LazyConfig(VitDensePreEmbedded)(
         out_features=OUT_FEATURES,
-        downproj=256,
         depth=3,  # vit5_small defaults to 12; 3 blocks to match other experiments
         num_heads=4,  # 256 / 4 = 64
         rope_dynamic_high=32,  # pixel coords 0–31 (32×32 image)
     )
+    config.net = LazyConfig(ConvStem)(net=vit, in_features=IN_FEATURES, dim=256)
 
     config.lightning_wrapper_class = LazyConfig(WSIAttnWrapper)(
         use_bce_loss=(OUT_FEATURES == 1),
